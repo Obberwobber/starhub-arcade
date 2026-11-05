@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sky Jump — StarHub Arcade</title>
+<link rel="stylesheet" href="../game.css">
+<style>
+canvas.game {
+  max-width: 100%; max-height: 100%; width: auto; height: auto;
+  border-radius: 14px; box-shadow: 0 12px 44px rgba(0,0,0,.55);
+  touch-action: none; background: #fdfcf3;
+}
+/* paper-friendly score chip readable on the white notebook background */
+.scorebar {
+  color: #3d5a2b; text-shadow: 0 1px 0 rgba(255,255,255,.9);
+  background: rgba(255,255,255,.75); border: 1px solid rgba(140,160,120,.45);
+  border-radius: 10px; padding: 4px 14px;
+}
+.scorebar .b { color: #c07f2e; }
+</style>
+</head><body>
+<header class="topbar">
+  <a class="back" href="../index.html">&larr; Arcade</a>
+  <h1>SKY JUMP</h1>
+  <span class="hint"><span class="kbd">&larr;</span><span class="kbd">&rarr;</span> or A/D move &middot; touch screen sides</span>
+</header>
+<main class="stage">
+  <canvas class="game" id="cv" width="420" height="640"></canvas>
+  <div class="scorebar"><span>Score <span id="score">0</span></span><span class="b">Best <span id="best">0</span></span></div>
+  <div class="overlay" id="overlay"><h2>SKY JUMP</h2><p>Bounce from platform to platform and climb as high as you can. Green platforms are steady, blue ones drift, cracked brown ones crumble beneath you. Don't fall!</p><button class="btn" id="startBtn">Play</button></div>
+</main>
+<script>
+'use strict';
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+const scoreEl = document.getElementById('score'), bestEl = document.getElementById('best');
+const overlay = document.getElementById('overlay'), startBtn = document.getElementById('startBtn');
+const KEY = 'arcade_best_skyjump';
+let best = +localStorage.getItem(KEY) || 0;
+bestEl.textContent = best;
+
+const GRAV = 0.35, BOUNCE = -12.4, SPEED = 5.2, START_Y = H - 140;
+let player, plats, camY, nextY, score, run = false;
+const input = { l: 0, r: 0, touch: 0 };
+
+function newPlat(y) {
+  const r = Math.random();
+  const t = r < .6 ? 'n' : r < .85 ? 'm' : 'b';
+  const w = t === 'b' ? 52 : 64;
+  return { x: 8 + Math.random() * (W - 16 - w), y, w, h: 12, t, vx: (Math.random() < .5 ? -1 : 1) * (1 + Math.random() * 1.5), vy: 0, dead: 0 };
+}
+
+function reset() {
+  player = { x: W / 2 - 16, y: START_Y, vx: 0, vy: BOUNCE, w: 32, h: 34, face: 1, sq: 0 };
+  plats = [{ x: W / 2 - 44, y: H - 60, w: 88, h: 12, t: 'n', vx: 0, vy: 0, dead: 0 }];
+  nextY = H - 60;
+  while (nextY > -H) { nextY -= 52 + Math.random() * 40; plats.push(newPlat(nextY)); }
+  camY = 0; score = 0; scoreEl.textContent = '0';
+}
+
+function update() {
+  const p = player;
+  const dir = (input.r ? 1 : 0) - (input.l ? 1 : 0) + input.touch;
+  const tv = Math.max(-1, Math.min(1, dir)) * SPEED;
+  p.vx += (tv - p.vx) * .25;
+  if (Math.abs(p.vx) > .5) p.face = Math.sign(p.vx);
+  p.x += p.vx;
+  if (p.x + p.w < 0) p.x = W; else if (p.x > W) p.x = -p.w;
+
+  const prevBot = p.y + p.h;
+  p.vy += GRAV;
+  p.y += p.vy;
+  if (p.sq > 0) p.sq--;
+
+  if (p.vy > 0) {
+    for (const q of plats) {
+      if (q.dead) continue;
+      if (prevBot <= q.y + 4 && p.y + p.h >= q.y && p.x < q.x + q.w && p.x + p.w > q.x) {
+        if (q.t === 'b') { q.dead = 1; q.vy = 0; }
+        else { p.vy = BOUNCE; p.y = q.y - p.h; p.sq = 7; }
+        break;
+      }
+    }
+  }
+
+  for (const q of plats) {
+    if (q.dead) { q.vy += .5; q.y += q.vy; continue; }
+    if (q.t === 'm') {
+      q.x += q.vx;
+      if (q.x < 4) { q.x = 4; q.vx *= -1; }
+      if (q.x + q.w > W - 4) { q.x = W - 4 - q.w; q.vx *= -1; }
+    }
+  }
+  plats = plats.filter(q => q.y - camY < H + 60);
+  while (nextY > camY - 160) { nextY -= 52 + Math.random() * 40; plats.push(newPlat(nextY)); }
+
+  if (p.y - camY < 235) camY = p.y - 235;
+
+  const sc = Math.floor(Math.max(0, START_Y - p.y) / 10);
+  if (sc !== score) { score = sc; scoreEl.textContent = sc; }
+
+  if (p.y - camY > H + 30) gameOver();
+}
+
+function platColor(t) {
+  if (t === 'm') return ['#9adcf8', '#2b7bb9']; // light blue drifters
+  if (t === 'b') return ['#c99a5b', '#7a5127']; // brown crumbly
+  return ['#8fdc5a', '#3a7d1e'];                // doodle green
+}
+
+function drawPlat(q) {
+  const sy = q.y - camY;
+  if (sy < -40 || sy > H + 40) return;
+  const [c1, c2] = platColor(q.t);
+  ctx.save();
+  if (q.dead) { ctx.translate(q.x + q.w / 2, sy + q.h / 2); ctx.rotate(Math.min(.5, q.vy * .06)); ctx.translate(-(q.x + q.w / 2), -(sy + q.h / 2)); ctx.globalAlpha = Math.max(0, 1 - q.vy * .08); }
+  /* hand-drawn bar: flat fill, pale top edge, sketchy double outline */
+  ctx.fillStyle = c1;
+  ctx.beginPath(); ctx.roundRect(q.x, sy, q.w, q.h, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.35)';
+  ctx.beginPath(); ctx.roundRect(q.x + 3, sy + 1.5, q.w - 6, 3.5, 2); ctx.fill();
+  ctx.strokeStyle = c2; ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.roundRect(q.x, sy, q.w, q.h, 7); ctx.stroke();
+  ctx.save(); /* second, slightly offset pass = wobbly pencil-line feel */
+  ctx.globalAlpha *= .45;
+  ctx.beginPath(); ctx.roundRect(q.x + .9, sy - .7, q.w - .4, q.h + .3, 7); ctx.stroke();
+  ctx.restore();
+  if (q.t === 'b') {
+    ctx.strokeStyle = 'rgba(70,42,16,.8)'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(q.x + q.w * .3, sy + 1); ctx.lineTo(q.x + q.w * .45, sy + q.h - 3);
+    ctx.moveTo(q.x + q.w * .62, sy + 1); ctx.lineTo(q.x + q.w * .55, sy + q.h - 4);
+    ctx.moveTo(q.x + q.w * .45, sy + 5); ctx.lineTo(q.x + q.w * .68, sy + 6);
+    ctx.stroke();
+  }
+  if (q.t === 'm') {
+    ctx.fillStyle = 'rgba(255,255,255,.8)';
+    ctx.beginPath(); ctx.arc(q.x + q.w / 2 - 8, sy + q.h / 2 - 1, 2, 0, 7); ctx.arc(q.x + q.w / 2 + 8, sy + q.h / 2 - 1, 2, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawBlob() {
+  const p = player, sy = p.y - camY;
+  ctx.save();
+  ctx.translate(p.x + p.w / 2, sy + p.h / 2);
+  const sq = 1 + p.sq * .025;
+  ctx.scale(sq, 2 - sq);
+  ctx.fillStyle = '#7ddc3f';
+  ctx.strokeStyle = '#3a7d1e'; ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.ellipse(0, 1, p.w * .55, p.h * .55, 0, 0, 7); ctx.fill(); ctx.stroke();
+  // feet
+  ctx.fillStyle = '#57b62a';
+  ctx.beginPath(); ctx.ellipse(-8, p.h * .5, 5, 3.4, 0, 0, 7); ctx.ellipse(8, p.h * .5, 5, 3.4, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#3a7d1e'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.ellipse(-8, p.h * .5, 5, 3.4, 0, 0, 7); ctx.ellipse(8, p.h * .5, 5, 3.4, 0, 0, 7); ctx.stroke();
+  // eyes
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(-7, -5, 5.2, 0, 7); ctx.arc(7, -5, 5.2, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#3a7d1e'; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.arc(-7, -5, 5.2, 0, 7); ctx.arc(7, -5, 5.2, 0, 7); ctx.stroke();
+  ctx.fillStyle = '#20301a';
+  ctx.beginPath(); ctx.arc(-7 + p.face * 1.8, -5, 2.4, 0, 7); ctx.arc(7 + p.face * 1.8, -5, 2.4, 0, 7); ctx.fill();
+  // mouth + blush
+  ctx.strokeStyle = '#2e5c16'; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.arc(0, 3, 4.5, .15 * Math.PI, .85 * Math.PI); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,140,120,.5)';
+  ctx.beginPath(); ctx.arc(-12, 2, 3, 0, 7); ctx.arc(12, 2, 3, 0, 7); ctx.fill();
+  ctx.restore();
+}
+
+function draw() {
+  /* notebook paper: warm white sheet, faint gray-blue grid that
+     scrolls with the world, and a red margin line down the left */
+  ctx.fillStyle = '#fdfcf3'; ctx.fillRect(0, 0, W, H);
+  const GS = 28;
+  ctx.strokeStyle = 'rgba(110,140,190,.22)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = .5; x < W; x += GS) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  const off = ((-camY % GS) + GS) % GS;
+  for (let y = off + .5; y < H; y += GS) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(226,96,96,.45)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(30.5, 0); ctx.lineTo(30.5, H); ctx.stroke();
+  for (const q of plats) drawPlat(q);
+  drawBlob();
+}
+
+function gameOver() {
+  run = false;
+  if (score > best) { best = score; localStorage.setItem(KEY, best); bestEl.textContent = best; }
+  overlay.querySelector('h2').textContent = 'GAME OVER';
+  overlay.querySelector('p').innerHTML = 'You climbed <b style="color:var(--acc)">' + score + '</b> &middot; Best: <b style="color:var(--gold)">' + best + '</b><br>Press <span class="kbd">Space</span> to jump again.';
+  startBtn.textContent = 'Play Again';
+  overlay.hidden = false;
+}
+
+function start() {
+  overlay.hidden = true;
+  reset();
+  run = true;
+}
+
+startBtn.addEventListener('click', start);
+
+addEventListener('keydown', e => {
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) e.preventDefault();
+  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') input.l = 1;
+  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') input.r = 1;
+  if ((e.key === ' ' || e.key === 'Enter') && !overlay.hidden) start();
+});
+addEventListener('keyup', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') input.l = 0;
+  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') input.r = 0;
+});
+
+function side(e) {
+  const r = cv.getBoundingClientRect();
+  return (e.clientX - r.left) < r.width / 2 ? -1 : 1;
+}
+cv.addEventListener('pointerdown', e => { input.touch = side(e); cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove', e => { if (e.buttons) input.touch = side(e); });
+cv.addEventListener('pointerup', () => { input.touch = 0; });
+cv.addEventListener('pointercancel', () => { input.touch = 0; });
+
+reset();
+(function frame() {
+  if (run) update();
+  draw();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body></html>

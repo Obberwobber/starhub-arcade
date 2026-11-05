@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tower Stack — StarHub Arcade</title>
+<link rel="stylesheet" href="../game.css">
+<style>
+canvas.game {
+  max-width: 100%; max-height: 100%; width: auto; height: auto;
+  border-radius: 14px; box-shadow: 0 12px 44px rgba(0,0,0,.55);
+  touch-action: manipulation; cursor: pointer;
+}
+</style>
+</head><body>
+<header class="topbar">
+  <a class="back" href="../index.html">&larr; Arcade</a>
+  <h1>TOWER STACK</h1>
+  <span class="hint"><span class="kbd">Space</span> or click / tap to drop the block</span>
+</header>
+<main class="stage">
+  <canvas class="game" id="cv" width="420" height="640"></canvas>
+  <div class="scorebar"><span>Score <span id="score">0</span></span><span class="b">Best <span id="best">0</span></span></div>
+  <div class="overlay" id="overlay"><h2>TOWER STACK</h2><p>A block slides back and forth — press <span class="kbd">Space</span> or tap to drop it on the tower. Overhang gets sliced off. Land it dead-center for a PERFECT to regrow width and chain combo bonuses!</p><button class="btn" id="startBtn">Play</button></div>
+</main>
+<script>
+'use strict';
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+const scoreEl = document.getElementById('score'), bestEl = document.getElementById('best');
+const overlay = document.getElementById('overlay'), startBtn = document.getElementById('startBtn');
+const KEY = 'arcade_best_stack';
+let best = +localStorage.getItem(KEY) || 0;
+bestEl.textContent = best;
+
+const BH = 30, BASE_W = 220, FLOOR = H - 110, DEPTH = 10;
+let tower, debris, texts, cur, camY, score, combo, run = false;
+
+const topWorld = () => tower.length * BH;
+const screenY = wy => FLOOR - (wy - camY); // screen y of a world-y point (world grows upward)
+
+function spawn() {
+  const w = tower[tower.length - 1].w;
+  const dir = tower.length % 2 ? -1 : 1;
+  cur = {
+    x: dir > 0 ? 14 : W - 14 - w,
+    w, dir,
+    speed: Math.min(6.5, 2 + tower.length * .14),
+    /* slow hue drift: purple → blue → teal → green → … → pink, cycling */
+    hue: ((270 - tower.length * 9) % 360 + 360) % 360
+  };
+}
+
+function reset() {
+  tower = [{ x: W / 2 - BASE_W / 2, w: BASE_W, hue: 270 }];
+  debris = []; texts = [];
+  camY = 0; score = 0; combo = 0;
+  scoreEl.textContent = '0';
+  spawn();
+}
+
+function drop() {
+  if (!run || !cur) return;
+  const prev = tower[tower.length - 1];
+  const L = Math.max(cur.x, prev.x), R = Math.min(cur.x + cur.w, prev.x + prev.w);
+  const ov = R - L;
+  const wy = topWorld();
+
+  if (ov <= 0) { // total miss
+    debris.push({ x: cur.x, w: cur.w, y: wy, vy: 1.5, rot: 0, vr: cur.dir * .07, hue: cur.hue });
+    cur = null;
+    run = false;
+    setTimeout(gameOver, 650);
+    return;
+  }
+
+  if (Math.abs(cur.x - prev.x) <= 8) { // PERFECT
+    combo++;
+    const cx = (L + R) / 2;
+    const w2 = Math.min(BASE_W, ov + 14);
+    tower.push({ x: cx - w2 / 2, w: w2, hue: cur.hue });
+    score += 1 + combo;
+    texts.push({ x: cx, y: wy, txt: 'PERFECT x' + combo, life: 1 });
+    scoreEl.textContent = score;
+  } else {
+    combo = 0;
+    const placed = { x: L, w: ov, hue: cur.hue };
+    if (cur.x < prev.x) // left overhang
+      debris.push({ x: cur.x, w: prev.x - cur.x, y: wy, vy: 1.5, rot: 0, vr: -.08, hue: cur.hue });
+    else // right overhang
+      debris.push({ x: prev.x + prev.w, w: cur.x + cur.w - prev.x - prev.w, y: wy, vy: 1.5, rot: 0, vr: .08, hue: cur.hue });
+    tower.push(placed);
+    score += 1;
+    scoreEl.textContent = score;
+  }
+  spawn();
+}
+
+function update() {
+  if (run && cur) {
+    cur.x += cur.dir * cur.speed;
+    if (cur.x < 8) { cur.x = 8; cur.dir = 1; }
+    if (cur.x + cur.w > W - 8) { cur.x = W - 8 - cur.w; cur.dir = -1; }
+  }
+  const target = Math.max(0, topWorld() - 300);
+  camY += (target - camY) * .09;
+  for (const d of debris) { d.vy += .45; d.y -= d.vy; d.rot += d.vr; }
+  debris = debris.filter(d => screenY(d.y) < H + 80);
+  for (const t of texts) { t.life -= .018; t.y += .35; }
+  texts = texts.filter(t => t.life > 0);
+}
+
+const hsl = (h, s, l) => 'hsl(' + h + ',' + s + '%,' + l + '%)';
+
+function drawBlock(x, sy, w, hue) {
+  const d = DEPTH;
+  /* left side face — darker parallelogram slanting up-left */
+  ctx.fillStyle = hsl(hue, 65, 30);
+  ctx.beginPath();
+  ctx.moveTo(x, sy); ctx.lineTo(x - d, sy - d);
+  ctx.lineTo(x - d, sy + BH - d); ctx.lineTo(x, sy + BH);
+  ctx.closePath(); ctx.fill();
+  /* top face — bright parallelogram offset up-left */
+  ctx.fillStyle = hsl(hue, 75, 70);
+  ctx.beginPath();
+  ctx.moveTo(x, sy); ctx.lineTo(x + w, sy);
+  ctx.lineTo(x + w - d, sy - d); ctx.lineTo(x - d, sy - d);
+  ctx.closePath(); ctx.fill();
+  /* front face — soft vertical gradient */
+  const g = ctx.createLinearGradient(0, sy, 0, sy + BH);
+  g.addColorStop(0, hsl(hue, 72, 56)); g.addColorStop(1, hsl(hue, 72, 42));
+  ctx.fillStyle = g;
+  ctx.fillRect(x, sy, w, BH);
+  ctx.fillStyle = 'rgba(255,255,255,.14)';
+  ctx.fillRect(x, sy, w, 2);
+  ctx.strokeStyle = 'rgba(0,0,0,.28)'; ctx.lineWidth = 1;
+  ctx.strokeRect(x + .5, sy + .5, w - 1, BH - 1);
+}
+
+function draw() {
+  /* dark elegant backdrop with a soft glow pooling under the tower */
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#22224a'); g.addColorStop(1, '#1a1a2e');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const gy = screenY(0);
+  const pg = ctx.createRadialGradient(W / 2, gy, 10, W / 2, gy, 280);
+  pg.addColorStop(0, 'rgba(255,255,255,.10)'); pg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = pg; ctx.fillRect(0, 0, W, H);
+
+  // ground strip
+  if (gy < H) { ctx.fillStyle = '#151527'; ctx.fillRect(0, gy, W, H - gy); }
+
+  for (let i = 0; i < tower.length; i++)
+    drawBlock(tower[i].x, screenY((i + 1) * BH), tower[i].w, tower[i].hue);
+
+  if (cur) drawBlock(cur.x, screenY(topWorld() + BH), cur.w, cur.hue);
+
+  for (const d of debris) {
+    ctx.save();
+    const sy = screenY(d.y + BH) + BH / 2;
+    ctx.translate(d.x + d.w / 2, sy);
+    ctx.rotate(d.rot);
+    ctx.translate(-(d.x + d.w / 2), -sy);
+    ctx.globalAlpha = Math.max(0, 1 - d.rot * 1.5);
+    drawBlock(d.x, sy - BH / 2, d.w, d.hue);
+    ctx.restore();
+  }
+
+  ctx.textAlign = 'center';
+  ctx.font = '800 20px "Segoe UI", system-ui, sans-serif';
+  for (const t of texts) {
+    ctx.globalAlpha = Math.min(1, t.life * 1.6);
+    ctx.fillStyle = '#ffd166';
+    ctx.fillText(t.txt, t.x, screenY(t.y + BH) - 14);
+  }
+  ctx.globalAlpha = 1;
+
+  /* subtle vignette for the moody Ketchapp look */
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * .32, W / 2, H / 2, H * .78);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.5)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+}
+
+function gameOver() {
+  if (score > best) { best = score; localStorage.setItem(KEY, best); bestEl.textContent = best; }
+  overlay.querySelector('h2').textContent = 'GAME OVER';
+  overlay.querySelector('p').innerHTML = 'Tower score: <b style="color:var(--acc)">' + score + '</b> &middot; Best: <b style="color:var(--gold)">' + best + '</b><br>Press <span class="kbd">Space</span> to rebuild.';
+  startBtn.textContent = 'Play Again';
+  overlay.hidden = false;
+}
+
+function start() {
+  overlay.hidden = true;
+  reset();
+  run = true;
+}
+
+startBtn.addEventListener('click', start);
+cv.addEventListener('pointerdown', () => { if (run) drop(); });
+addEventListener('keydown', e => {
+  if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
+  if (e.key === ' ' || e.key === 'ArrowDown' || e.key === 'Enter') {
+    if (!overlay.hidden) start();
+    else drop();
+  }
+});
+
+reset();
+(function frame() {
+  update();
+  draw();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body></html>

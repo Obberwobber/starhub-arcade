@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StarHub Arcade — Free Browser Games</title>
+<meta name="description" content="Free browser games: voxel sandbox, egg car driving, snake, block drop, 2048 and more.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕹️</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="logo">🕹️</div>
+    <div>
+      <h1>STARHUB ARCADE</h1>
+      <div class="sub">Free browser games — no downloads, no sign-up. High scores save on this device.</div>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <label class="search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="q" type="text" placeholder="Search games…" autocomplete="off">
+    </label>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <div class="tab-row">
+      <button class="tab sel" data-cat="platformer">🏃 Platformer</button>
+      <button class="tab" data-cat="shooting">🎯 Shooting</button>
+      <button class="tab" data-cat="car">🚗 Car Games</button>
+    </div>
+    <div class="tab-row">
+      <button class="tab" data-cat="popular">🔥 Popular</button>
+      <button class="tab" data-cat="simulator">🎮 Simulator</button>
+      <button class="tab" data-cat="puzzle">🧩 Puzzle</button>
+    </div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <footer class="foot">
+    <p>All games are original open-source-style recreations of classic gameplay, built with vanilla JS and canvas.</p>
+    <p>Part of <a href="../">STARHUB</a> · Progress and high scores are stored locally in your browser.</p>
+  </footer>
+</div>
+
+<script>
+const GAMES = [
+  { id: 'voxel',       file: 'voxel.html',    name: 'Blockcraft',   icon: '⛏️', categories: ['simulator'], hue: ['#3b7d3a','#1d4e89'], desc: 'Minecraft-style voxel world: mine blocks, build, explore.' },
+  { id: 'eggcar',      file: 'eggcar.html',   name: 'Eggy Car',     icon: '🥚', categories: ['car'], hue: ['#f4a259','#bc4b51'], desc: 'Balance a fragile egg on your car over endless hills.' },
+  { id: 'rocketleague',file: 'rocketleague.html', name: 'Rocket Soccer', icon: '⚽', categories: ['car'], hue: ['#ff6b35','#f7c548'], desc: 'RC car soccer with boost, jumps, and aerial goals.' },
+  { id: 'fortnite',    file: 'fortnite.html', name: 'Battle Royale', icon: '🎯', categories: ['shooting'], hue: ['#00d2ff','#3a7bd5'], desc: 'Battle royale: shoot, build, survive the storm, be the last standing.' },
+  { id: 'snake',       file: 'snake.html',    name: 'Snake',        icon: '🐍', categories: ['platformer', 'puzzle'], hue: ['#2e8b57','#14532d'], desc: 'Eat, grow, don\'t hit the walls — the timeless classic.' },
+  { id: 'blockdrop',   file: 'blockdrop.html',name: 'Block Drop',   icon: '🧱', categories: ['puzzle'], hue: ['#5b21b6','#1e3a8a'], desc: 'The classic falling-blocks game. Clear lines, level up.' },
+  { id: 'g2048',       file: '2048.html',     name: '2048',         icon: '🔢', categories: ['puzzle'], hue: ['#b45309','#78350f'], desc: 'Slide and merge tiles to reach the legendary 2048.' },
+  { id: 'flappy',      file: 'flappy.html',   name: 'Flappy Wings', icon: '🐤', categories: ['platformer'], hue: ['#0ea5e9','#164e63'], desc: 'Tap to flap through the pipes. Easy to learn, hard to master.' },
+  { id: 'breakout',    file: 'breakout.html', name: 'Breakout',     icon: '🧊', categories: ['shooting'], hue: ['#dc2626','#7f1d1d'], desc: 'Smash every brick with your paddle and ball.' },
+  { id: 'dinorun',     file: 'dinorun.html',  name: 'Dino Run',     icon: '🦖', categories: ['platformer'], hue: ['#525252','#171717'], desc: 'The offline classic — jump cacti, dodge birds, run forever.' },
+  { id: 'minesweeper', file: 'minesweeper.html', name: 'Minesweeper', icon: '💣', categories: ['puzzle'], hue: ['#334155','#0f172a'], desc: 'Flag the mines, clear the field, trust the numbers.' },
+  { id: 'pong',        file: 'pong.html',     name: 'Pong',         icon: '🏓', categories: ['shooting'], hue: ['#059669','#064e3b'], desc: 'The original video game — beat the AI, first to 7.' },
+  { id: 'skyjump',     file: 'skyjump.html',  name: 'Sky Jump',     icon: '🚀', categories: ['platformer'], hue: ['#84cc16','#365314'], desc: 'Bounce platform to platform as high as you can.' },
+  { id: 'memory',      file: 'memory.html',   name: 'Memory Match', icon: '🃏', categories: ['puzzle'], hue: ['#c026d3','#701a75'], desc: 'Flip cards and match every pair in as few moves as possible.' },
+  { id: 'whack',       file: 'whack.html',    name: 'Whack-a-Mole', icon: '🔨', categories: ['shooting'], hue: ['#a16207','#451a03'], desc: 'Bonk the moles before they duck back underground.' },
+  { id: 'simon',       file: 'simon.html',    name: 'Simon',        icon: '🎵', categories: ['puzzle'], hue: ['#db2777','#4c1d95'], desc: 'Repeat the growing pattern of lights and sounds.' },
+  { id: 'stack',       file: 'stack.html',    name: 'Tower Stack',  icon: '🏗️', categories: ['platformer'], hue: ['#0891b2','#155e75'], desc: 'Drop moving blocks dead-center and stack to the sky.' },
+];
+
+const grid = document.getElementById('grid');
+const tabsEl = document.getElementById('tabs');
+const q = document.getElementById('q');
+let currentCat = 'platformer';
+
+function best(id) {
+  const v = localStorage.getItem('arcade_best_' + id);
+  return v ? Number(v).toLocaleString() : null;
+}
+
+function incrementPlayCount(id) {
+  const key = 'arcade_plays_' + id;
+  const current = parseInt(localStorage.getItem(key) || '0');
+  localStorage.setItem(key, String(current + 1));
+}
+
+function getPlayCount(id) {
+  return parseInt(localStorage.getItem('arcade_plays_' + id) || '0');
+}
+
+function render() {
+  const query = q.value.trim().toLowerCase();
+  let list = GAMES.filter(g =>
+    g.name.toLowerCase().includes(query) || g.desc.toLowerCase().includes(query));
+
+  if (currentCat === 'popular') {
+    list = list.sort((a, b) => getPlayCount(b.id) - getPlayCount(a.id));
+  } else {
+    list = list.filter(g => g.categories && g.categories.includes(currentCat));
+  }
+
+  grid.innerHTML = '';
+  if (!list.length) {
+    grid.innerHTML = '<div class="empty">No games match your search.</div>';
+    return;
+  }
+  for (const g of list) {
+    const a = document.createElement('a');
+    a.className = 'card';
+    a.href = 'games/' + g.file;
+    a.onclick = () => { incrementPlayCount(g.id); };
+    const b = best(g.id);
+    const plays = getPlayCount(g.id);
+    const thumb = generateThumbnail(g);
+    a.innerHTML =
+      `<div class="thumb"><img src="${thumb}" alt="${g.name}">` +
+      (b ? `<span class="best">🏆 ${b}</span>` : '') +
+      (plays > 0 ? `<span class="plays">▶ ${plays}</span>` : '') +
+      `</div>` +
+      `<div class="meta"><h3>${g.name}</h3><p>${g.desc}</p></div>`;
+    grid.appendChild(a);
+  }
+}
+
+function generateThumbnail(game) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 180;
+  const ctx = canvas.getContext('2d');
+
+  switch(game.id) {
+    case 'voxel':
+      ctx.fillStyle = '#87b8e8';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#4a8c3a';
+      for(let i=0; i<40; i++) {
+        const x = Math.random()*280+20;
+        const y = Math.random()*80+80;
+        ctx.fillRect(x, y, 16, 16);
+        ctx.fillStyle = '#3b7d3a';
+        ctx.fillRect(x, y, 16, 4);
+        ctx.fillStyle = '#4a8c3a';
+      }
+      ctx.fillStyle = '#1d4e89';
+      ctx.fillRect(140, 120, 40, 40);
+      ctx.fillStyle = '#f4a259';
+      ctx.fillRect(145, 105, 30, 20);
+      break;
+    case 'eggcar':
+      ctx.fillStyle = '#f7c548';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#87b8e8';
+      ctx.fillRect(0, 120, 320, 60);
+      ctx.fillStyle = '#3b7d3a';
+      ctx.beginPath();
+      ctx.moveTo(0, 140);
+      for(let i=0; i<320; i+=40) {
+        ctx.lineTo(i, 130+Math.sin(i*0.05)*10);
+      }
+      ctx.lineTo(320, 180);
+      ctx.lineTo(0, 180);
+      ctx.fill();
+      ctx.fillStyle = '#e74c3c';
+      ctx.fillRect(140, 130, 40, 25);
+      ctx.fillStyle = '#3498db';
+      ctx.beginPath();
+      ctx.arc(150, 115, 12, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(152, 112, 3, 0, Math.PI*2);
+      ctx.fill();
+      break;
+    case 'rocketleague':
+      ctx.fillStyle = '#2d5a27';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(40, 60, 240, 60);
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(160, 90, 15, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#ff6b35';
+      ctx.fillRect(80, 75, 30, 20);
+      ctx.fillStyle = '#4ecdc4';
+      ctx.fillRect(210, 75, 30, 20);
+      break;
+    case 'fortnite':
+      ctx.fillStyle = '#2d5a27';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.strokeStyle = '#1e4a20';
+      ctx.lineWidth = 1;
+      for(let x=0; x<320; x+=40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, 180);
+        ctx.stroke();
+      }
+      for(let y=0; y<180; y+=40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(320, y);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#4a3728';
+      ctx.beginPath();
+      ctx.arc(80, 80, 20, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#2d5a27';
+      ctx.beginPath();
+      ctx.arc(80, 80, 15, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#3498db';
+      ctx.fillRect(150, 80, 20, 20);
+      ctx.fillStyle = '#e74c3c';
+      ctx.fillRect(200, 70, 20, 25);
+      ctx.strokeStyle = '#8e44ad';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(160, 90, 60, 0, Math.PI*2);
+      ctx.stroke();
+      break;
+    case 'snake':
+      ctx.fillStyle = '#90EE90';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#7CCD7C';
+      for(let x=0; x<320; x+=40) {
+        for(let y=0; y<180; y+=40) {
+          if((x/40+y/40)%2===0) ctx.fillRect(x, y, 40, 40);
+        }
+      }
+      ctx.fillStyle = '#4169E1';
+      ctx.fillRect(100, 70, 20, 20);
+      ctx.fillRect(120, 70, 20, 20);
+      ctx.fillRect(140, 70, 20, 20);
+      ctx.fillStyle = '#1e3a8a';
+      ctx.fillRect(160, 70, 20, 20);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(162, 74, 6, 6);
+      ctx.fillRect(170, 74, 6, 6);
+      ctx.fillStyle = '#ff0000';
+      ctx.beginPath();
+      ctx.arc(200, 90, 12, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#006400';
+      ctx.fillRect(196, 78, 4, 8);
+      ctx.fillRect(200, 76, 4, 10);
+      ctx.fillRect(204, 78, 4, 8);
+      break;
+    case 'blockdrop':
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#5b21b6';
+      ctx.fillRect(120, 20, 40, 40);
+      ctx.fillStyle = '#7c3aed';
+      ctx.fillRect(120, 60, 40, 40);
+      ctx.fillStyle = '#8b5cf6';
+      ctx.fillRect(120, 100, 40, 40);
+      ctx.fillStyle = '#a78bfa';
+      ctx.fillRect(120, 140, 40, 40);
+      ctx.strokeStyle = '#4c1d95';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(120, 20, 40, 40);
+      ctx.strokeRect(120, 60, 40, 40);
+      ctx.strokeRect(120, 100, 40, 40);
+      ctx.strokeRect(120, 140, 40, 40);
+      break;
+    case 'g2048':
+      ctx.fillStyle = '#bbada0';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#cdc1b4';
+      ctx.fillRect(20, 20, 65, 65);
+      ctx.fillRect(95, 20, 65, 65);
+      ctx.fillRect(170, 20, 65, 65);
+      ctx.fillRect(245, 20, 65, 65);
+      ctx.fillRect(20, 95, 65, 65);
+      ctx.fillRect(95, 95, 65, 65);
+      ctx.fillStyle = '#eee4da';
+      ctx.fillRect(52, 52, 65, 65);
+      ctx.fillStyle = '#edc22e';
+      ctx.fillRect(52, 52, 65, 65);
+      ctx.fillStyle = '#f9f6f2';
+      ctx.font = 'bold 24px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('64', 84, 93);
+      break;
+    case 'flappy':
+      ctx.fillStyle = '#87CEEB';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#98FB98';
+      ctx.fillRect(0, 140, 320, 40);
+      ctx.fillStyle = '#228B22';
+      ctx.fillRect(60, 50, 40, 120);
+      ctx.fillRect(60, 0, 40, 40);
+      ctx.fillRect(220, 30, 40, 110);
+      ctx.fillRect(220, 140, 40, 40);
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.ellipse(160, 90, 20, 15, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.ellipse(170, 85, 10, 8, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.arc(173, 85, 3, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#FF8C00';
+      ctx.beginPath();
+      ctx.moveTo(180, 90);
+      ctx.lineTo(195, 88);
+      ctx.lineTo(180, 92);
+      ctx.fill();
+      break;
+    case 'breakout':
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#e74c3c';
+      for(let i=0; i<8; i++) {
+        ctx.fillRect(20+i*38, 20, 34, 15);
+        ctx.fillStyle = '#c0392b';
+        ctx.fillRect(20+i*38, 38, 34, 15);
+        ctx.fillStyle = '#e74c3c';
+      }
+      ctx.fillStyle = '#3498db';
+      ctx.fillRect(130, 150, 60, 12);
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(160, 130, 8, 0, Math.PI*2);
+      ctx.fill();
+      break;
+    case 'dinorun':
+      ctx.fillStyle = '#f5f5f5';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#444';
+      ctx.fillRect(40, 140, 20, 30);
+      ctx.fillRect(80, 130, 20, 40);
+      ctx.fillRect(140, 125, 20, 45);
+      ctx.fillRect(200, 135, 20, 35);
+      ctx.fillStyle = '#555';
+      ctx.fillRect(140, 110, 40, 25);
+      ctx.fillRect(180, 115, 15, 20);
+      ctx.fillRect(150, 95, 20, 20);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(155, 100, 8, 8);
+      ctx.fillRect(165, 100, 8, 8);
+      break;
+    case 'minesweeper':
+      ctx.fillStyle = '#c0c0c0';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#808080';
+      ctx.fillRect(10, 10, 300, 160);
+      ctx.fillStyle = '#c0c0c0';
+      for(let x=20; x<300; x+=40) {
+        for(let y=20; y<160; y+=40) {
+          ctx.fillRect(x, y, 36, 36);
+          ctx.fillStyle = '#c0c0c0';
+          ctx.fillRect(x+2, y+2, 32, 32);
+          ctx.fillStyle = '#808080';
+          ctx.fillRect(x, y+34, 36, 2);
+          ctx.fillRect(x+34, y, 2, 36);
+          ctx.fillStyle = '#c0c0c0';
+        }
+      }
+      ctx.fillStyle = '#ff0000';
+      ctx.font = 'bold 28px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('💣', 160, 110);
+      break;
+    case 'pong':
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(20, 60, 10, 60);
+      ctx.fillRect(290, 70, 10, 60);
+      ctx.beginPath();
+      ctx.arc(160, 90, 8, 0, Math.PI*2);
+      ctx.fill();
+      ctx.setLineDash([10, 10]);
+      ctx.beginPath();
+      ctx.moveTo(160, 10);
+      ctx.lineTo(160, 170);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = 'bold 36px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('3', 80, 50);
+      ctx.fillText('5', 240, 50);
+      break;
+    case 'skyjump':
+      ctx.fillStyle = '#fdfcf3';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.strokeStyle = '#d4d4c4';
+      ctx.lineWidth = 1;
+      for(let x=20; x<320; x+=40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, 180);
+        ctx.stroke();
+      }
+      for(let y=20; y<180; y+=40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(320, y);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#7ddc3f';
+      ctx.beginPath();
+      ctx.ellipse(160, 90, 18, 24, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#8fdc5a';
+      ctx.fillRect(60, 130, 80, 12);
+      ctx.fillRect(180, 70, 70, 12);
+      ctx.fillRect(40, 40, 60, 12);
+      break;
+    case 'memory':
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#c026d3';
+      for(let i=0; i<6; i++) {
+        ctx.fillRect(20+i*50, 50, 45, 60);
+        ctx.fillStyle = '#701a75';
+        ctx.fillRect(25+i*50, 55, 35, 50);
+        ctx.fillStyle = '#c026d3';
+      }
+      ctx.fillStyle = '#701a75';
+      ctx.fillRect(25, 55, 35, 50);
+      ctx.fillRect(175, 55, 35, 50);
+      ctx.fillStyle = '#fff';
+      ctx.font = '24px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('🎮', 42, 88);
+      ctx.fillText('🎲', 192, 88);
+      break;
+    case 'whack':
+      ctx.fillStyle = '#4a7c23';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#5c4a32';
+      for(let i=0; i<4; i++) {
+        ctx.beginPath();
+        ctx.arc(60+i*80, 90, 25, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#3d3a28';
+        ctx.beginPath();
+        ctx.arc(60+i*80, 90, 18, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#5c4a32';
+      }
+      ctx.fillStyle = '#8B4513';
+      ctx.beginPath();
+      ctx.arc(140, 80, 20, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#DEB887';
+      ctx.beginPath();
+      ctx.arc(135, 75, 12, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(145, 75, 12, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.arc(133, 73, 3, 0, Math.PI*2);
+      ctx.arc(147, 73, 3, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#ff69b4';
+      ctx.beginPath();
+      ctx.arc(140, 85, 6, 0, Math.PI*2);
+      ctx.fill();
+      break;
+    case 'simon':
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#2ecc71';
+      ctx.beginPath();
+      ctx.arc(140, 80, 50, Math.PI, Math.PI*1.5);
+      ctx.fill();
+      ctx.fillStyle = '#e74c3c';
+      ctx.beginPath();
+      ctx.arc(180, 80, 50, Math.PI*1.5, 0);
+      ctx.fill();
+      ctx.fillStyle = '#f1c40f';
+      ctx.beginPath();
+      ctx.arc(140, 110, 50, Math.PI, Math.PI*0.5);
+      ctx.fill();
+      ctx.fillStyle = '#3498db';
+      ctx.beginPath();
+      ctx.arc(180, 110, 50, Math.PI*0.5, 0);
+      ctx.fill();
+      ctx.fillStyle = '#333';
+      ctx.beginPath();
+      ctx.arc(160, 95, 25, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('SIMON', 160, 98);
+      break;
+    case 'stack':
+      const g = ctx.createLinearGradient(0, 0, 0, 180);
+      g.addColorStop(0, '#22224a');
+      g.addColorStop(1, '#1a1a2e');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 320, 180);
+      const hues = [270, 261, 252, 243, 234];
+      hues.forEach((h, i) => {
+        const y = 140 - i*25;
+        ctx.fillStyle = `hsl(${h}, 72%, 56%)`;
+        ctx.fillRect(50, y, 220, 20);
+        ctx.fillStyle = `hsl(${h}, 65%, 30%)`;
+        ctx.fillRect(45, y-5, 10, 20);
+        ctx.fillStyle = `hsl(${h}, 75%, 70%)`;
+        ctx.fillRect(45, y-5, 220, 10);
+      });
+      break;
+  }
+
+  return canvas.toDataURL();
+}
+
+tabsEl.querySelectorAll('.tab').forEach(btn => {
+  btn.onclick = () => {
+    currentCat = btn.dataset.cat;
+    tabsEl.querySelectorAll('.tab').forEach(x => x.classList.toggle('sel', x === btn));
+    render();
+  };
+});
+q.addEventListener('input', render);
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whack-a-Mole — StarHub Arcade</title>
+<link rel="stylesheet" href="../game.css">
+<style>
+.field {
+  display: grid; grid-template-columns: repeat(3, minmax(86px, 130px));
+  gap: 18px; padding: 16px;
+}
+.hole {
+  position: relative; aspect-ratio: 1 / .82; overflow: hidden;
+  border-radius: 18px; border: 1px solid #2a6e31;
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(255,255,255,.18), transparent 55%),
+    repeating-linear-gradient(100deg, rgba(255,255,255,.05) 0 4px, transparent 4px 11px),
+    repeating-linear-gradient(-80deg, rgba(0,0,0,.05) 0 5px, transparent 5px 13px),
+    linear-gradient(180deg, #57b25a 0%, #3f9146 60%, #34803b 100%);
+  box-shadow: inset 0 -10px 18px rgba(0,0,0,.18), 0 4px 12px rgba(0,0,0,.35);
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44'%3E%3Ctext y='34' font-size='34'%3E🔨%3C/text%3E%3C/svg%3E") 22 36, pointer;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+}
+.hole::before { /* dirt mound behind the mole */
+  content: ''; position: absolute; z-index: 0;
+  left: 4%; right: 4%; bottom: 14%; height: 30%;
+  background: radial-gradient(ellipse at 50% 100%, #7a5630 0%, #5c3d1e 62%, transparent 78%);
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+}
+.hole::after { /* dark elliptical pit opening in front of the mole */
+  content: ''; position: absolute; z-index: 2;
+  left: 6%; right: 6%; bottom: 2%; height: 34%;
+  background: radial-gradient(ellipse at 50% 42%, #160b04 28%, #33200f 66%, #59391c 100%);
+  border-radius: 50%; border: 3px solid #7c5a33;
+  box-shadow: inset 0 8px 14px rgba(0,0,0,.85), inset 0 -3px 6px rgba(120,80,40,.5), 0 3px 8px rgba(0,0,0,.35);
+}
+.mole {
+  position: absolute; z-index: 1; left: 10%; right: 10%; bottom: 12%; height: 92%;
+  display: flex; align-items: flex-end; justify-content: center;
+  font-size: clamp(44px, 10vw, 66px); line-height: 1;
+  transform: translateY(110%); transition: transform .16s ease-out;
+  pointer-events: none;
+}
+.hole.on .mole { transform: translateY(0); }
+.mole.gold { filter: sepia(1) saturate(5) hue-rotate(-12deg) brightness(1.15) drop-shadow(0 0 12px #ffd166); }
+.mole.bonk { transform: translateY(26%) scaleY(.55) !important; transition: transform .1s; }
+.hole.bad { border-color: #e05252; box-shadow: inset 0 0 22px rgba(224,82,82,.55), 0 4px 12px rgba(0,0,0,.35); }
+.pop {
+  position: absolute; z-index: 3; top: 12%; left: 50%; transform: translateX(-50%);
+  font-weight: 800; font-size: 18px; color: var(--acc); pointer-events: none;
+  text-shadow: 0 1px 4px rgba(0,0,0,.7); animation: floatUp .7s ease-out forwards;
+}
+.pop.gold { color: var(--gold); font-size: 21px; }
+.pop.miss { color: #f87171; }
+@keyframes floatUp { to { transform: translate(-50%, -30px); opacity: 0; } }
+#cd {
+  position: absolute; z-index: 6; inset: 0; display: none;
+  align-items: center; justify-content: center;
+  font-size: clamp(70px, 18vw, 120px); font-weight: 900; color: var(--acc);
+  text-shadow: 0 0 30px rgba(110, 231, 255, .5); pointer-events: none;
+}
+#cd.show { display: flex; }
+#cd.zoom { animation: cdpop .68s ease-out; }
+@keyframes cdpop { 0% { transform: scale(2.2); opacity: 0; } 25% { opacity: 1; } 100% { transform: scale(1); opacity: .9; } }
+.urgent { color: #f87171 !important; }
+</style>
+</head><body>
+<header class="topbar">
+  <a class="back" href="../index.html">&larr; Arcade</a>
+  <h1>WHACK-A-MOLE</h1>
+  <span class="hint">Click moles +10 &middot; gold +50 &middot; empty hole &minus;5</span>
+</header>
+<main class="stage">
+  <div class="scorebar"><span>Score <span id="score">0</span></span><span>Time <span id="time">30</span></span><span class="b">Best <span id="best">0</span></span></div>
+  <div class="field" id="field"></div>
+  <div id="cd"></div>
+  <div class="overlay" id="overlay"><h2>WHACK-A-MOLE</h2><p>Moles pop up for 30 seconds — bonk them for <b>+10</b>. Golden moles are worth <b>+50</b>, but whacking an empty hole costs <b>−5</b>. They get faster!</p><button class="btn" id="startBtn">Play</button></div>
+</main>
+<script>
+'use strict';
+const field = document.getElementById('field'), cd = document.getElementById('cd');
+const scoreEl = document.getElementById('score'), timeEl = document.getElementById('time'), bestEl = document.getElementById('best');
+const overlay = document.getElementById('overlay'), startBtn = document.getElementById('startBtn');
+const KEY = 'arcade_best_whack';
+let best = +localStorage.getItem(KEY) || 0;
+bestEl.textContent = best;
+
+const holes = [];
+for (let i = 0; i < 9; i++) {
+  const h = document.createElement('div');
+  h.className = 'hole';
+  h.innerHTML = '<div class="mole">🐹</div>';
+  field.appendChild(h);
+  holes.push(h);
+}
+
+let score = 0, timeLeft = 30, running = false;
+let spawnTimer = null, clockTimer = null;
+
+const prog = () => 1 - timeLeft / 30;
+const upDur = () => 1120 - 580 * prog();
+const gap = () => (940 - 540 * prog()) * (0.6 + Math.random() * 0.8);
+
+function popup(h, txt, cls) {
+  const p = document.createElement('span');
+  p.className = 'pop' + (cls ? ' ' + cls : '');
+  p.textContent = txt;
+  h.appendChild(p);
+  setTimeout(() => p.remove(), 720);
+}
+
+function hide(h) {
+  clearTimeout(h._t);
+  h.classList.remove('on');
+  delete h.dataset.mole; delete h.dataset.dead; delete h.dataset.gold;
+}
+
+function spawn() {
+  if (!running) return;
+  const free = holes.filter(h => !h.dataset.mole);
+  if (free.length) {
+    const h = free[Math.floor(Math.random() * free.length)];
+    const gold = Math.random() < .13;
+    h.dataset.mole = '1';
+    if (gold) h.dataset.gold = '1';
+    h.querySelector('.mole').classList.toggle('gold', gold);
+    h.classList.add('on');
+    h._t = setTimeout(() => hide(h), upDur());
+  }
+  spawnTimer = setTimeout(spawn, gap());
+}
+
+function bonk(h) {
+  const gold = !!h.dataset.gold;
+  const pts = gold ? 50 : 10;
+  score += pts;
+  scoreEl.textContent = score;
+  popup(h, '+' + pts, gold ? 'gold' : '');
+  clearTimeout(h._t);
+  h.dataset.dead = '1';
+  const m = h.querySelector('.mole');
+  m.classList.add('bonk');
+  setTimeout(() => { hide(h); m.classList.remove('bonk'); }, 170);
+}
+
+for (const h of holes) {
+  h.addEventListener('pointerdown', () => {
+    if (!running) return;
+    if (h.dataset.mole && !h.dataset.dead) bonk(h);
+    else if (!h.dataset.mole) {
+      score -= 5;
+      scoreEl.textContent = score;
+      popup(h, '-5', 'miss');
+      h.classList.add('bad');
+      setTimeout(() => h.classList.remove('bad'), 220);
+    }
+  });
+}
+
+function countdown(cb) {
+  const steps = ['3', '2', '1', 'GO!'];
+  let i = 0;
+  cd.classList.add('show');
+  (function step() {
+    if (i === steps.length) { cd.classList.remove('show'); cb(); return; }
+    cd.textContent = steps[i++];
+    cd.classList.remove('zoom');
+    void cd.offsetWidth;
+    cd.classList.add('zoom');
+    setTimeout(step, 700);
+  })();
+}
+
+function end() {
+  running = false;
+  clearTimeout(spawnTimer); clearInterval(clockTimer);
+  holes.forEach(hide);
+  timeEl.classList.remove('urgent');
+  if (score > best) { best = score; localStorage.setItem(KEY, best); bestEl.textContent = best; }
+  overlay.querySelector('h2').textContent = "TIME'S UP!";
+  overlay.querySelector('p').innerHTML = 'You scored <b style="color:var(--acc)">' + score + '</b> &middot; Best: <b style="color:var(--gold)">' + best + '</b>';
+  startBtn.textContent = 'Play Again';
+  overlay.hidden = false;
+}
+
+function start() {
+  overlay.hidden = true;
+  score = 0; timeLeft = 30;
+  scoreEl.textContent = '0'; timeEl.textContent = '30';
+  holes.forEach(hide);
+  countdown(() => {
+    running = true;
+    spawn();
+    clockTimer = setInterval(() => {
+      timeLeft--;
+      timeEl.textContent = timeLeft;
+      if (timeLeft <= 5) timeEl.classList.add('urgent');
+      if (timeLeft <= 0) end();
+    }, 1000);
+  });
+}
+
+startBtn.addEventListener('click', start);
+addEventListener('keydown', e => {
+  if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
+  if ((e.key === ' ' || e.key === 'Enter') && !overlay.hidden) startBtn.click();
+});
+</script>
+</body></html>

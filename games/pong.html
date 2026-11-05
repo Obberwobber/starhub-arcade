@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pong — StarHub Arcade</title>
+<link rel="stylesheet" href="../game.css">
+<style>
+canvas.game { touch-action: none; border-radius: 12px; box-shadow: 0 10px 44px rgba(0,0,0,.5); }
+</style>
+</head><body>
+<header class="topbar">
+  <a class="back" href="../index.html">&larr; Arcade</a>
+  <h1>PONG</h1>
+  <span class="hint"><span class="kbd">W</span><span class="kbd">S</span> / <span class="kbd">&uarr;</span><span class="kbd">&darr;</span> / mouse move &middot; first to 7 &middot; <span class="kbd">P</span> pause &middot; <span class="kbd">R</span> restart</span>
+</header>
+<main class="stage">
+  <canvas class="game" id="c"></canvas>
+  <div class="scorebar">
+    <span>YOU <span id="pEl">0</span></span>
+    <span>CPU <span id="cEl">0</span></span>
+    <span>BEST MARGIN <span class="b" id="bEl">—</span></span>
+  </div>
+  <div class="overlay" id="overlay">
+    <h2>PONG</h2>
+    <p>The original video game. You are the left paddle — move with <span class="kbd">W</span>/<span class="kbd">S</span>,
+       arrow keys, or your mouse/finger. The ball speeds up every rally and angles off where it hits.
+       First to 7 wins.</p>
+    <button class="btn" id="startBtn">Play</button>
+  </div>
+</main>
+<script>
+'use strict';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const overlay = document.getElementById('overlay'), startBtn = document.getElementById('startBtn');
+const pEl = document.getElementById('pEl'), cEl = document.getElementById('cEl'), bEl = document.getElementById('bEl');
+/* arcade_best_pong stores the player's largest WINNING MARGIN (e.g. 7-3 -> 4). */
+const LS = 'arcade_best_pong';
+const VW = 900, VH = 540, WIN = 7;
+
+function fit() {
+  const r = cv.parentElement.getBoundingClientRect();
+  const k = Math.max(.3, Math.min((r.width - 24) / VW, (r.height - 24) / VH));
+  cv.style.width = VW * k + 'px';
+  cv.style.height = VH * k + 'px';
+  const d = Math.min(devicePixelRatio || 1, 2) * k;
+  cv.width = Math.round(VW * d);
+  cv.height = Math.round(VH * d);
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+}
+addEventListener('resize', fit);
+fit();
+
+const PL = { x: 30, w: 14, h: 96, y: VH / 2 };       // player (left)
+const AI = { x: VW - 30, w: 14, h: 96, y: VH / 2 };  // cpu (right)
+const ball = { x: VW / 2, y: VH / 2, r: 8, vx: 0, vy: 0, sp: 430 };
+let pScore = 0, cScore = 0, rally = 0, aiErr = 0, serveT = 0, dir = 1;
+let state = 'menu', paused = false; // menu | play | over
+let best = +localStorage.getItem(LS) || 0;
+const keys = {};
+
+function hud() {
+  pEl.textContent = pScore; cEl.textContent = cScore;
+  bEl.textContent = best > 0 ? '+' + best : '—';
+}
+
+function serveBall() {
+  ball.x = VW / 2; ball.y = VH / 2;
+  ball.sp = 430;
+  const a = (Math.random() * .7 - .35);             // shallow serve angle
+  ball.vx = Math.cos(a) * ball.sp * dir;
+  ball.vy = Math.sin(a) * ball.sp;
+  aiErr = Math.random() * 60 - 30;                  // AI misjudges each serve a little
+  serveT = .7;
+}
+
+function start() {
+  pScore = 0; cScore = 0; rally = 0; paused = false;
+  PL.y = AI.y = VH / 2;
+  dir = Math.random() < .5 ? -1 : 1;
+  serveBall(); hud();
+  state = 'play';
+  overlay.hidden = true;
+}
+
+function gameOver() {
+  state = 'over';
+  const won = pScore > cScore, margin = pScore - cScore;
+  if (won) { best = Math.max(best, margin); localStorage.setItem(LS, best); }
+  hud();
+  overlay.innerHTML =
+    '<h2>' + (won ? 'YOU WIN!' : 'CPU WINS') + '</h2>' +
+    '<p>Final ' + pScore + ' &ndash; ' + cScore +
+    (won ? ' &middot; margin +' + margin + ' &middot; best +' + best : '') +
+    '<br>Press <span class="kbd">R</span> or <span class="kbd">Space</span> to rematch.</p>' +
+    '<button class="btn" id="startBtn">Restart</button>';
+  overlay.hidden = false;
+  overlay.querySelector('button').onclick = start;
+}
+startBtn.onclick = start;
+
+function hit(p, dirSign) {
+  const off = Math.max(-1, Math.min(1, (ball.y - p.y) / (p.h / 2)));
+  rally++;
+  ball.sp = Math.min(430 + rally * 42, 980);        // faster every paddle hit
+  const a = off * 1.05;                             // up to ~60 deg
+  ball.vx = Math.cos(a) * ball.sp * dirSign;
+  ball.vy = Math.sin(a) * ball.sp;
+}
+
+function step(dt) {
+  /* player paddle */
+  const pv = 560;
+  if (keys.w || keys.W || keys.ArrowUp) PL.y -= pv * dt;
+  if (keys.s || keys.S || keys.ArrowDown) PL.y += pv * dt;
+  PL.y = Math.max(PL.h / 2, Math.min(VH - PL.h / 2, PL.y));
+
+  /* AI: tracks the ball only once it crosses mid-court heading right,
+     capped speed + per-serve error keeps it beatable. */
+  const aiSp = Math.min(330 + rally * 14, 520);
+  let target = VH / 2;
+  if (ball.vx > 0 && ball.x > VW * .4) {
+    /* aim a bit ahead of the ball's current y for competent tracking */
+    target = ball.y + ball.vy * .12 + aiErr;
+  }
+  const d = target - AI.y;
+  if (Math.abs(d) > 7) AI.y += Math.sign(d) * Math.min(aiSp * dt, Math.abs(d));
+  AI.y = Math.max(AI.h / 2, Math.min(VH - AI.h / 2, AI.y));
+
+  if (serveT > 0) { serveT -= dt; return; }         // brief pause between points
+
+  ball.x += ball.vx * dt;
+  ball.y += ball.vy * dt;
+
+  /* top / bottom walls */
+  if (ball.y - ball.r < 0) { ball.y = ball.r; ball.vy = Math.abs(ball.vy); }
+  if (ball.y + ball.r > VH) { ball.y = VH - ball.r; ball.vy = -Math.abs(ball.vy); }
+
+  /* player paddle */
+  if (ball.vx < 0 && ball.x - ball.r <= PL.x + PL.w && ball.x - ball.r > PL.x - ball.sp * dt &&
+      Math.abs(ball.y - PL.y) <= PL.h / 2 + ball.r) {
+    ball.x = PL.x + PL.w + ball.r;
+    hit(PL, 1);
+  }
+  /* AI paddle */
+  if (ball.vx > 0 && ball.x + ball.r >= AI.x && ball.x + ball.r < AI.x + AI.w + ball.sp * dt &&
+      Math.abs(ball.y - AI.y) <= AI.h / 2 + ball.r) {
+    ball.x = AI.x - ball.r;
+    hit(AI, -1);
+  }
+
+  /* scoring */
+  if (ball.x < -30) { cScore++; rally = 0; dir = 1; hud(); pScore >= WIN || cScore >= WIN ? gameOver() : serveBall(); }
+  if (ball.x > VW + 30) { pScore++; rally = 0; dir = -1; hud(); pScore >= WIN || cScore >= WIN ? gameOver() : serveBall(); }
+}
+
+/* original Pong look: flat white on pure black, chunky 3x5 pixel score digits */
+const DIGITS = {
+  '0': '111101101101111', '1': '010110010010111', '2': '111001111100111',
+  '3': '111001111001111', '4': '101101111001001', '5': '111100111001111',
+  '6': '111100111101111', '7': '111001010010010', '8': '111101111101111',
+  '9': '111101111001111'
+};
+function drawScore(n, cx) {
+  const s = 15, str = String(n), w = str.length * 4 * s - s;
+  ctx.fillStyle = '#fff';
+  for (let d = 0, x = cx - w / 2; d < str.length; d++, x += 4 * s) {
+    const bits = DIGITS[str[d]];
+    for (let i = 0; i < 15; i++)
+      if (bits[i] === '1')
+        ctx.fillRect(x + (i % 3) * s, 30 + Math.floor(i / 3) * s, s - 2, s - 2);
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, VW, VH);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH);   // pure black playfield
+
+  /* center net: column of white dashes */
+  ctx.fillStyle = '#fff';
+  for (let y = 8; y < VH - 8; y += 26) ctx.fillRect(VW / 2 - 2, y, 4, 14);
+
+  /* big white blocky score near top center */
+  drawScore(pScore, VW / 2 - 110);
+  drawScore(cScore, VW / 2 + 110);
+
+  /* plain white rectangle paddles + square ball */
+  ctx.fillRect(PL.x, PL.y - PL.h / 2, PL.w, PL.h);
+  ctx.fillRect(AI.x, AI.y - AI.h / 2, AI.w, AI.h);
+  ctx.fillRect(ball.x - ball.r, ball.y - ball.r, ball.r * 2, ball.r * 2);
+
+  if (paused) {
+    ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.fillRect(0, 0, VW, VH);
+    ctx.fillStyle = '#fff'; ctx.font = '800 34px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('PAUSED', VW / 2, VH / 2);
+  }
+}
+
+let last = 0;
+function frame(t) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((t - last) / 1000 || 0, .033);
+  last = t;
+  if (state === 'play' && !paused) step(dt);
+  draw();
+}
+requestAnimationFrame(frame);
+
+/* ---- input ---- */
+const STOP = new Set([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+addEventListener('keydown', e => {
+  if (STOP.has(e.key)) e.preventDefault();
+  if (e.repeat) return;
+  keys[e.key] = true;
+  const k = e.key.toLowerCase();
+  if (k === 'r') { start(); return; }
+  if (e.key === ' ' && state !== 'play') { start(); return; }
+  if ((k === 'p' || e.key === 'Escape') && state === 'play') paused = !paused;
+});
+addEventListener('keyup', e => keys[e.key] = false);
+
+function pointY(e) {
+  const r = cv.getBoundingClientRect();
+  PL.y = Math.max(PL.h / 2, Math.min(VH - PL.h / 2, (e.clientY - r.top) / r.height * VH));
+}
+cv.addEventListener('pointermove', pointY);
+cv.addEventListener('pointerdown', pointY);
+</script>
+</body></html>

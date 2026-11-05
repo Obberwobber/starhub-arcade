@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Blockcraft — StarHub Arcade</title>
+<link rel="stylesheet" href="../game.css">
+<style>
+  .stage { background: linear-gradient(#87b8e8 0%, #b8d9f0 60%, #0b0e1a 100%); }
+  #cv { display: block; width: 100%; height: 100%; }
+  .crosshair {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #fff; font-size: 22px; font-weight: 300; text-shadow: 0 0 4px #000;
+    pointer-events: none; z-index: 3; mix-blend-mode: difference;
+  }
+  .hotbar {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 4px; z-index: 4;
+  }
+  .slot {
+    width: 46px; height: 46px; border: 2px solid rgba(255,255,255,.25);
+    border-radius: 8px; background: rgba(8,12,26,.55); cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    backdrop-filter: blur(3px); transition: border-color .1s;
+  }
+  .slot.sel { border-color: #6ee7ff; box-shadow: 0 0 10px rgba(110,231,255,.5); }
+  .slot .sw { width: 26px; height: 26px; border-radius: 3px; border: 1px solid rgba(0,0,0,.4); image-rendering: pixelated; }
+  .slot .nm { font-size: 8px; color: #cfd6f5; margin-top: 2px; letter-spacing: .3px; }
+  .coords {
+    position: absolute; top: 12px; left: 14px; z-index: 3; font-size: 12px;
+    color: #fff; text-shadow: 0 1px 3px #000; font-family: Consolas, monospace;
+  }
+  /* touch controls */
+  .tzone { display: none; }
+  body.touch .tzone { display: block; }
+  #stick {
+    position: absolute; bottom: 76px; left: 26px; width: 110px; height: 110px;
+    border-radius: 50%; border: 2px solid rgba(255,255,255,.3);
+    background: rgba(8,12,26,.3); z-index: 5; touch-action: none;
+  }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 46px; height: 46px;
+    border-radius: 50%; background: rgba(255,255,255,.45);
+    transform: translate(-50%,-50%); pointer-events: none;
+  }
+  .tbtn {
+    position: absolute; z-index: 5; width: 62px; height: 62px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.35); background: rgba(8,12,26,.5);
+    color: #fff; font-size: 22px; display: grid; place-items: center;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  #btnJump { bottom: 90px; right: 26px; }
+  #btnBreak { bottom: 160px; right: 60px; }
+  #btnPlace { bottom: 90px; right: 104px; width: 50px; height: 50px; font-size: 17px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="back" href="../index.html">&larr; Arcade</a>
+  <h1>BLOCKCRAFT</h1>
+  <span class="hint"><span class="kbd">WASD</span> move · <span class="kbd">Space</span> jump · <span class="kbd">LMB</span> mine · <span class="kbd">RMB</span> place · <span class="kbd">1-9</span>/<span class="kbd">wheel</span> block</span>
+</header>
+<main class="stage">
+  <canvas id="cv"></canvas>
+  <div class="crosshair">+</div>
+  <div class="coords" id="coords"></div>
+  <div class="hotbar" id="hotbar"></div>
+  <div class="tzone" id="stick"><div id="knob"></div></div>
+  <div class="tzone tbtn" id="btnJump">▲</div>
+  <div class="tzone tbtn" id="btnBreak">⛏</div>
+  <div class="tzone tbtn" id="btnPlace">▣</div>
+  <div class="overlay" id="overlay">
+    <h2>BLOCKCRAFT</h2>
+    <p>An endless blocky world. <b>Left-click</b> to mine, <b>right-click</b> to place.
+       Pick blocks with <b>1–9</b> or the scroll wheel. Your builds are saved on this device.</p>
+    <button class="btn" id="startBtn">Play</button>
+  </div>
+</main>
+<script src="../lib/three.min.js"></script>
+<script>
+'use strict';
+/* ============ blocks ============ */
+const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAF=6, PLANK=7, BRICK=8, GLASS=9;
+// per-block face tile indices {top,side,bottom} into the texture atlas
+const BC = {
+  [GRASS]:{t:0, s:1,  b:2,  n:'Grass'},
+  [DIRT]: {t:2, s:2,  b:2,  n:'Dirt'},
+  [STONE]:{t:3, s:3,  b:3,  n:'Stone'},
+  [SAND]: {t:4, s:4,  b:4,  n:'Sand'},
+  [WOOD]: {t:6, s:5,  b:6,  n:'Wood'},
+  [LEAF]: {t:7, s:7,  b:7,  n:'Leaves'},
+  [PLANK]:{t:8, s:8,  b:8,  n:'Planks'},
+  [BRICK]:{t:9, s:9,  b:9,  n:'Brick'},
+  [GLASS]:{t:10,s:10, b:10, n:'Glass'},
+};
+
+/* ---- procedural 16x16 tile atlas (pixel-art textures painted at runtime) ---- */
+const TILE=16, NTILES=11;
+const atlasCv=document.createElement('canvas');
+atlasCv.width=TILE*NTILES; atlasCv.height=TILE;
+const actx=atlasCv.getContext('2d');
+function tp(t,x,y,r,g,b,a){ actx.fillStyle=`rgba(${r|0},${g|0},${b|0},${a===undefined?1:a/255})`; actx.fillRect(t*TILE+x,y,1,1); }
+function tn(x,y,t){ let n=(x*374761393+y*668265263+t*1013904223)|0; n=Math.imul(n^(n>>>13),1274126177); return ((n^(n>>>16))>>>0)/4294967295; }
+function noiseTile(t,r,g,b,vary){
+  for(let y=0;y<16;y++)for(let x=0;x<16;x++){
+    const v=(tn(x,y,t)-0.5)*vary;
+    tp(t,x,y,r+v,g+v,b+v);
+  }
+}
+// 0 grass top, 1 grass side, 2 dirt, 3 stone, 4 sand
+noiseTile(0, 94,157,52, 26);
+noiseTile(2, 121,85,58, 32);
+noiseTile(3, 125,125,125, 16);
+noiseTile(4, 219,206,160, 18);
+noiseTile(1, 121,85,58, 32);
+for(let x=0;x<16;x++){                        // ragged grass edge on dirt
+  const d=3+(tn(x,99,1)*3|0);
+  for(let y=0;y<d;y++){ const v=(tn(x,y,7)-0.5)*26; tp(1,x,y,94+v,157+v,52+v); }
+}
+// 5 log side (vertical bark streaks), 6 log top (rings)
+for(let x=0;x<16;x++){
+  const dark=tn(x,3,5)>0.45 ? -28 : 0;
+  for(let y=0;y<16;y++){ const v=(tn(x,y,5)-0.5)*18; tp(5,x,y,104+v+dark,81+v+dark,50+v+dark); }
+}
+for(let y=0;y<16;y++)for(let x=0;x<16;x++){
+  const d=Math.hypot(x-7.5,y-7.5);
+  const ring=(d*1.4|0)%2===0;
+  const v=(tn(x,y,6)-0.5)*14;
+  tp(6,x,y, ring?177+v:135+v, ring?142+v:105+v, ring?90+v:65+v);
+}
+// 7 leaves — noisy green with cutout holes
+for(let y=0;y<16;y++)for(let x=0;x<16;x++){
+  if(tn(x,y,7)<0.12){ tp(7,x,y,0,0,0,0); continue; }
+  const v=(tn(x,y,7)-0.5)*34;
+  tp(7,x,y,58+v,118+v,34+v);
+}
+// 8 planks — horizontal boards
+for(let y=0;y<16;y++)for(let x=0;x<16;x++){
+  const seam=(y%4===3)||(x===((y/4|0)%2?7:15));
+  const v=(tn(x,y,8)-0.5)*18;
+  tp(8,x,y, seam?110+v:157+v, seam?88+v:127+v, seam?55+v:77+v);
+}
+// 9 brick — red bricks + mortar
+for(let y=0;y<16;y++)for(let x=0;x<16;x++){
+  const row=(y/4|0), mortar=(y%4===3)||(x===((row%2)?0:8))||(x===((row%2)?8:0));
+  const v=(tn(x,y,9)-0.5)*20;
+  tp(9,x,y, mortar?188+v:150+v, mortar?176+v:66+v, mortar?162+v:52+v);
+}
+// 10 glass — white frame + faint diagonal streaks, transparent centre
+for(let y=0;y<16;y++)for(let x=0;x<16;x++){
+  const border=(x===0||x===15||y===0||y===15);
+  const streak=((x+y)%11===0);
+  tp(10,x,y,225,240,246, border?230:(streak?70:0));
+}
+const HOTBAR = [GRASS,DIRT,STONE,SAND,WOOD,LEAF,PLANK,BRICK,GLASS];
+const opaque = b => b!==AIR && b!==GLASS;
+
+/* ============ world gen ============ */
+const CW=16, CH=48;                 // chunk width, world height
+let SEED = (Math.random()*1e9)|0;
+function h2(x,z){
+  let n = (x*374761393 + z*668265263 + SEED*974634211)|0;
+  n = Math.imul(n ^ (n>>>13), 1274126177);
+  return ((n ^ (n>>>16))>>>0)/4294967295;
+}
+function n2(x,z){
+  const xi=Math.floor(x), zi=Math.floor(z), xf=x-xi, zf=z-zi;
+  const u=xf*xf*(3-2*xf), v=zf*zf*(3-2*zf);
+  return h2(xi,zi)*(1-u)*(1-v)+h2(xi+1,zi)*u*(1-v)+h2(xi,zi+1)*(1-u)*v+h2(xi+1,zi+1)*u*v;
+}
+function fbm(x,z){ return n2(x*0.018,z*0.018)*0.62 + n2(x*0.055,z*0.055)*0.28 + n2(x*0.16,z*0.16)*0.10; }
+const hAt = (x,z)=> Math.floor(7 + fbm(x,z)*30);
+const treeAt = (x,z)=> h2(x*31+7, z*17-3) < 0.012;
+
+/* ============ chunks ============ */
+const chunks = new Map();           // "cx,cz" -> {data:Uint8Array, mesh, tmesh}
+const edits = new Map();            // "x,y,z" -> block id (player changes)
+try {
+  const saved = JSON.parse(localStorage.getItem('arcade_voxel_edits')||'[]');
+  const s2 = localStorage.getItem('arcade_voxel_seed');
+  if (s2) SEED = +s2;
+  for (const [k,v] of saved) edits.set(k, v);
+} catch(e){}
+addEventListener('beforeunload', save);
+let dirty=false; setInterval(()=>{ if(dirty) save(); }, 4000);
+function save(){
+  dirty=false;
+  try{
+    localStorage.setItem('arcade_voxel_seed', SEED);
+    localStorage.setItem('arcade_voxel_edits', JSON.stringify([...edits].slice(-30000)));
+  }catch(e){}
+}
+
+function genChunk(cx,cz){
+  const d = new Uint8Array(CW*CH*CW);
+  const trees = [];
+  for(let z=0;z<CW;z++) for(let x=0;x<CW;x++){
+    const wx=cx*CW+x, wz=cz*CW+z, h=hAt(wx,wz);
+    for(let y=0;y<=h && y<CH;y++){
+      let b;
+      if(y===h)      b = (h<=10 ? SAND : GRASS);
+      else if(y>h-4) b = (h<=10 ? SAND : DIRT);
+      else           b = STONE;
+      d[y*256+z*16+x]=b;
+    }
+    if(h>10 && h<CH-8 && treeAt(wx,wz)) trees.push([x,h+1,z]);
+  }
+  // neighbor-aware tree guard: only plant if trunk not on border corner (keeps leaves in-chunk-ish)
+  for(const [x,y,z] of trees){
+    for(let i=0;i<4 && y+i<CH;i++) d[(y+i)*256+z*16+x]=WOOD;
+    for(let dy=2;dy<=4;dy++) for(let dx=-2;dx<=2;dx++) for(let dz=-2;dz<=2;dz++){
+      if(Math.abs(dx)===2 && Math.abs(dz)===2) continue;
+      const lx=x+dx, ly=y+dy, lz=z+dz;
+      if(lx<0||lx>=CW||lz<0||lz>=CW||ly<0||ly>=CH) continue;
+      const i=ly*256+lz*16+lx;
+      if(d[i]===AIR) d[i]=LEAF;
+    }
+    // crown
+    if(y+5<CH){ for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++){
+      const lx=x+dx,lz=z+dz; if(lx<0||lx>=CW||lz<0||lz>=CW) continue;
+      const i=(y+5)*256+lz*16+lx; if(d[i]===AIR) d[i]=LEAF;
+    }}
+  }
+  // apply saved edits
+  for(const [k,v] of edits){
+    const [ex,ey,ez]=k.split(',').map(Number);
+    if(ex>=cx*CW && ex<cx*CW+CW && ez>=cz*CW && ez<cz*CW+CW && ey>=0 && ey<CH)
+      d[ey*256+(ez-cz*CW)*16+(ex-cx*CW)]=v;
+  }
+  return d;
+}
+const key=(cx,cz)=>cx+','+cz;
+function loadChunk(cx,cz){
+  const k=key(cx,cz); if(chunks.has(k)) return chunks.get(k);
+  const c={data:genChunk(cx,cz),mesh:null,tmesh:null,cx,cz};
+  chunks.set(k,c); buildMesh(c);
+  // neighbors may have been meshed before we existed — rebuild their shared border
+  for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]){
+    const n=chunks.get(key(cx+dx,cz+dz));
+    if(n) buildMesh(n);
+  }
+  return c;
+}
+function worldBlock(x,y,z){
+  if(y<0) return STONE; if(y>=CH) return AIR;
+  const cx=Math.floor(x/CW), cz=Math.floor(z/CW);
+  const c=chunks.get(key(cx,cz)); if(!c) return AIR;
+  return c.data[y*256+(z-cz*CW)*16+(x-cx*CW)];
+}
+function setBlock(x,y,z,b){
+  if(y<0||y>=CH) return;
+  const cx=Math.floor(x/CW), cz=Math.floor(z/CW);
+  const c=chunks.get(key(cx,cz)); if(!c) return;
+  const i=y*256+(z-cz*CW)*16+(x-cx*CW);
+  c.data[i]=b;
+  // persist edit relative to generated terrain is complex — store absolute
+  edits.set(x+','+y+','+z, b); dirty=true;
+  buildMesh(c);
+  // rebuild bordering chunks if on edge
+  const lx=x-cx*CW, lz=z-cz*CW;
+  if(lx===0)        remesh(cx-1,cz);
+  if(lx===CW-1)     remesh(cx+1,cz);
+  if(lz===0)        remesh(cx,cz-1);
+  if(lz===CW-1)     remesh(cx,cz+1);
+}
+function remesh(cx,cz){ const c=chunks.get(key(cx,cz)); if(c) buildMesh(c); }
+
+/* ============ meshing ============ */
+const FACES=[ // [dir, corner quad (CCW seen from outside), shade-key]
+  {d:[ 1,0,0], q:[[1,0,1],[1,0,0],[1,1,0],[1,1,1]], f:'s'},
+  {d:[-1,0,0], q:[[0,0,0],[0,0,1],[0,1,1],[0,1,0]], f:'s'},
+  {d:[0, 1,0], q:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]], f:'t'},
+  {d:[0,-1,0], q:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]], f:'b'},
+  {d:[0,0, 1], q:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]], f:'s'},
+  {d:[0,0,-1], q:[[1,0,0],[0,0,0],[0,1,0],[1,1,0]], f:'s'},
+];
+const SHADE={t:1.0,s:0.78,b:0.55};
+let scene;
+function buildMesh(c){
+  const pos=[],col=[],uv=[],idx=[], tpos=[],tcol=[],tuv=[],tidx=[];
+  const bx=c.cx*CW, bz=c.cz*CW;
+  for(let y=0;y<CH;y++)for(let z=0;z<CW;z++)for(let x=0;x<CW;x++){
+    const b=c.data[y*256+z*16+x]; if(b===AIR) continue;
+    const wx=bx+x, wz=bz+z;
+    for(const f of FACES){
+      const nb=worldBlock(wx+f.d[0], y+f.d[1], wz+f.d[2]);
+      if(b===GLASS){ if(nb===GLASS) continue; }
+      else if(opaque(nb)) continue;
+      const base=pos.length/3, tbase=tpos.length/3;
+      const tile=BC[b][f.f], sh=SHADE[f.f];
+      const vr=0.94+h2(wx*13+y*7,wz*11+y*5)*0.12;   // per-block tint jitter
+      const arr = b===GLASS?tpos:pos, carr=b===GLASS?tcol:col,
+                  uarr = b===GLASS?tuv:uv, iarr=b===GLASS?tidx:idx;
+      for(const v of f.q){
+        arr.push(x+v[0], y+v[1], z+v[2]);
+        carr.push(sh*vr, sh*vr, sh*vr);
+        // map face-local coords onto the tile: u = horizontal axis, v = up axis
+        const ul=(f.d[0]!==0)?v[2]:v[0];
+        const vl=(f.d[1]!==0)?v[2]:v[1];
+        uarr.push((tile+ul)/NTILES, vl);
+      }
+      const bb=(b===GLASS?tbase:base);
+      iarr.push(bb,bb+1,bb+2, bb,bb+2,bb+3);
+    }
+  }
+  if(c.mesh){ scene.remove(c.mesh); c.mesh.geometry.dispose(); }
+  if(c.tmesh){ scene.remove(c.tmesh); c.tmesh.geometry.dispose(); }
+  c.mesh=c.tmesh=null;
+  if(pos.length){
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv,2));
+    g.setIndex(idx);
+    c.mesh=new THREE.Mesh(g, opaqueMat);
+    c.mesh.position.set(bx,0,bz); scene.add(c.mesh);
+  }
+  if(tpos.length){
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(tpos,3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(tcol,3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(tuv,2));
+    g.setIndex(tidx);
+    c.tmesh=new THREE.Mesh(g, glassMat);
+    c.tmesh.position.set(bx,0,bz); scene.add(c.tmesh);
+  }
+}
+
+/* ============ three setup ============ */
+const cv=document.getElementById('cv');
+const renderer=new THREE.WebGLRenderer({canvas:cv, antialias:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+scene=new THREE.Scene();
+scene.background=new THREE.Color(0x7cb0f0);
+scene.fog=new THREE.Fog(0x7cb0f0, 30, 95);
+const camera=new THREE.PerspectiveCamera(75, 1, 0.1, 300);
+const atlasTex=new THREE.CanvasTexture(atlasCv);
+atlasTex.magFilter=THREE.NearestFilter; atlasTex.minFilter=THREE.NearestFilter;
+atlasTex.colorSpace=THREE.SRGBColorSpace;
+const opaqueMat=new THREE.MeshBasicMaterial({map:atlasTex, vertexColors:true, alphaTest:0.5});
+const glassMat=new THREE.MeshBasicMaterial({map:atlasTex, vertexColors:true, transparent:true, depthWrite:false});
+function resize(){
+  const w=cv.clientWidth, h=cv.clientHeight;
+  renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+
+// block highlight
+const hlGeo=new THREE.BoxGeometry(1.002,1.002,1.002);
+const hl=new THREE.LineSegments(new THREE.EdgesGeometry(hlGeo),
+  new THREE.LineBasicMaterial({color:0x000000, transparent:true, opacity:0.6}));
+hl.visible=false; scene.add(hl);
+
+/* ============ player ============ */
+const spawnH=hAt(0,0)+2;
+const P={x:0.5,y:spawnH,z:0.5, vx:0,vy:0,vz:0, yaw:0,pitch:-0.15, onGround:false, fly:false};
+const PW=0.3, PH=1.8, EYE=1.62;
+const keys={};
+addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(e.code.startsWith('Digit')){ const i=+e.code.slice(5)-1; if(i>=0&&i<HOTBAR.length) select(i); }
+  if(e.code==='KeyF'){ P.fly=!P.fly; P.vy=0; }
+  if(['Space','ArrowUp','ArrowDown'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup',e=>keys[e.code]=false);
+addEventListener('wheel',e=>select((sel+(e.deltaY>0?1:HOTBAR.length-1))%HOTBAR.length));
+
+let sel=0;
+const hotbarEl=document.getElementById('hotbar');
+HOTBAR.forEach((b,i)=>{
+  const d=document.createElement('div');
+  d.className='slot'+(i===0?' sel':'');
+  const sw=document.createElement('canvas');
+  sw.width=sw.height=16; sw.className='sw';
+  sw.getContext('2d').drawImage(atlasCv, BC[b].s*TILE,0,TILE,TILE, 0,0,16,16);
+  d.appendChild(sw);
+  d.insertAdjacentHTML('beforeend',`<div class="nm">${BC[b].n}</div>`);
+  d.onclick=()=>select(i);
+  hotbarEl.appendChild(d);
+});
+function select(i){ sel=i; [...hotbarEl.children].forEach((el,j)=>el.classList.toggle('sel',j===i)); }
+
+function solidAt(x,y,z){ return opaque(worldBlock(Math.floor(x),Math.floor(y),Math.floor(z))); }
+function collide(){
+  // axis-separated AABB vs voxel grid
+  const e=PW;
+  P.x+=P.vx;
+  function overlap(dx,dy,dz){
+    const x0=Math.floor(P.x-e+dx),x1=Math.floor(P.x+e+dx);
+    const y0=Math.floor(P.y+dy), y1=Math.floor(P.y+PH-0.001+dy);
+    const z0=Math.floor(P.z-e+dz),z1=Math.floor(P.z+e+dz);
+    for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++)for(let z=z0;z<=z1;z++)
+      if(solidAt(x,y,z)) return true;
+    return false;
+  }
+  // X axis
+  if(overlap(0,0,0)){
+    if(P.vx>0) P.x=Math.floor(P.x+e)-e-0.001;
+    else if(P.vx<0) P.x=Math.floor(P.x-e)+1+e+0.001;
+    P.vx=0;
+  }
+  // Z axis
+  P.z+=P.vz;
+  if(overlap(0,0,0)){
+    if(P.vz>0) P.z=Math.floor(P.z+e)-e-0.001;
+    else if(P.vz<0) P.z=Math.floor(P.z-e)+1+e+0.001;
+    P.vz=0;
+  }
+  // Y axis
+  P.y+=P.vy;
+  P.onGround=false;
+  if(overlap(0,0,0)){
+    if(P.vy<0){ P.y=Math.floor(P.y)+1; P.onGround=true; }
+    else P.y=Math.floor(P.y+PH)-PH-0.001;
+    P.vy=0;
+  }
+}
+
+/* ============ picking (DDA raycast) ============ */
+function raycast(){
+  const cp=Math.cos(P.pitch), sp=Math.sin(P.pitch);
+  const dx=-Math.sin(P.yaw)*cp, dy=sp, dz=-Math.cos(P.yaw)*cp;
+  let x=P.x, y=P.y+EYE, z=P.z;
+  let px=Math.floor(x), py=Math.floor(y), pz=Math.floor(z);
+  const sx=Math.sign(dx), sy=Math.sign(dy), sz=Math.sign(dz);
+  const tdx=Math.abs(1/dx), tdy=Math.abs(1/dy), tdz=Math.abs(1/dz);
+  let tx=((sx>0?px+1-x:x-px))*tdx;
+  let ty=((sy>0?py+1-y:y-py))*tdy;
+  let tz=((sz>0?pz+1-z:z-pz))*tdz;
+  let lx=px,ly=py,lz=pz, t=0;
+  for(let i=0;i<200 && t<8;i++){
+    lx=px;ly=py;lz=pz;
+    if(tx<ty && tx<tz){ px+=sx; t=tx; tx+=tdx; }
+    else if(ty<tz)    { py+=sy; t=ty; ty+=tdy; }
+    else              { pz+=sz; t=tz; tz+=tdz; }
+    if(opaque(worldBlock(px,py,pz)) || worldBlock(px,py,pz)===GLASS)
+      return {x:px,y:py,z:pz, nx:lx,ny:ly,nz:lz};
+  }
+  return null;
+}
+function breakBlock(){ const h=raycast(); if(h) setBlock(h.x,h.y,h.z,AIR); }
+function placeBlock(){
+  const h=raycast(); if(!h) return;
+  const {nx,ny,nz}=h;
+  // don't place inside player
+  if(nx+1>P.x-PW && nx<P.x+PW && nz+1>P.z-PW && nz<P.z+PW && ny+1>P.y && ny<P.y+PH) return;
+  if(opaque(worldBlock(nx,ny,nz))||worldBlock(nx,ny,nz)===GLASS) return;
+  setBlock(nx,ny,nz,HOTBAR[sel]);
+}
+
+/* ============ input: pointer lock / touch ============ */
+const overlay=document.getElementById('overlay');
+const isTouch='ontouchstart' in window;
+if(isTouch) document.body.classList.add('touch');
+let locked=false;
+document.getElementById('startBtn').onclick=()=>{
+  if(!isTouch){ cv.requestPointerLock(); } else { overlay.hidden=true; }
+};
+document.addEventListener('pointerlockchange',()=>{
+  locked=document.pointerLockElement===cv;
+  overlay.hidden=locked;
+});
+addEventListener('mousemove',e=>{
+  if(!locked) return;
+  P.yaw  -=e.movementX*0.0026;
+  P.pitch-=e.movementY*0.0026;
+  P.pitch=Math.max(-1.55,Math.min(1.55,P.pitch));
+});
+addEventListener('mousedown',e=>{
+  if(!locked) return;
+  if(e.button===0) breakBlock();
+  else if(e.button===2) placeBlock();
+});
+addEventListener('contextmenu',e=>e.preventDefault());
+
+// touch: left joystick moves, right half drag looks
+const stick=document.getElementById('stick'), knob=document.getElementById('knob');
+let stickId=null, lookId=null, lx0=0, ly0=0;
+const move={x:0,y:0};
+stick.addEventListener('touchstart',e=>{ stickId=e.changedTouches[0].identifier; e.preventDefault(); },{passive:false});
+addEventListener('touchmove',e=>{
+  for(const t of e.changedTouches){
+    if(t.identifier===stickId){
+      const r=stick.getBoundingClientRect();
+      let dx=(t.clientX-(r.left+r.width/2))/(r.width/2);
+      let dy=(t.clientY-(r.top+r.height/2))/(r.height/2);
+      const m=Math.hypot(dx,dy); if(m>1){dx/=m;dy/=m;}
+      move.x=dx; move.y=-dy;
+      knob.style.transform=`translate(calc(-50% + ${dx*32}px), calc(-50% + ${dy*32}px))`;
+    } else if(t.identifier===lookId){
+      P.yaw  -=(t.clientX-lx0)*0.006; P.pitch-=(t.clientY-ly0)*0.006;
+      P.pitch=Math.max(-1.55,Math.min(1.55,P.pitch));
+      lx0=t.clientX; ly0=t.clientY;
+    }
+  }
+},{passive:false});
+addEventListener('touchstart',e=>{
+  for(const t of e.changedTouches){
+    if(t.clientX>innerWidth*0.45 && lookId===null && !e.target.closest('.tbtn') && !e.target.closest('.hotbar')){
+      lookId=t.identifier; lx0=t.clientX; ly0=t.clientY;
+    }
+  }
+},{passive:false});
+addEventListener('touchend',e=>{
+  for(const t of e.changedTouches){
+    if(t.identifier===stickId){ stickId=null; move.x=move.y=0; knob.style.transform='translate(-50%,-50%)'; }
+    if(t.identifier===lookId) lookId=null;
+  }
+});
+document.getElementById('btnJump').addEventListener('touchstart',e=>{e.preventDefault();keys['Space']=true;},{passive:false});
+document.getElementById('btnJump').addEventListener('touchend',()=>keys['Space']=false);
+document.getElementById('btnBreak').addEventListener('touchstart',e=>{e.preventDefault();breakBlock();},{passive:false});
+document.getElementById('btnPlace').addEventListener('touchstart',e=>{e.preventDefault();placeBlock();},{passive:false});
+
+/* ============ main loop ============ */
+const coordsEl=document.getElementById('coords');
+let last=performance.now();
+function tick(now){
+  requestAnimationFrame(tick);
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+
+  // stream chunks around player
+  const pcx=Math.floor(P.x/CW), pcz=Math.floor(P.z/CW), R=3;
+  for(let dz=-R;dz<=R;dz++)for(let dx=-R;dx<=R;dx++) loadChunk(pcx+dx,pcz+dz);
+  for(const [k,c] of chunks){
+    if(Math.abs(c.cx-pcx)>R+1||Math.abs(c.cz-pcz)>R+1){
+      if(c.mesh){scene.remove(c.mesh);c.mesh.geometry.dispose();}
+      if(c.tmesh){scene.remove(c.tmesh);c.tmesh.geometry.dispose();}
+      chunks.delete(k);
+    }
+  }
+
+  if(locked||isTouch){
+    const sp=keys['ShiftLeft']?7.5:4.5;
+    let fx=0,fz=0;
+    if(keys['KeyW'])fz+=1; if(keys['KeyS'])fz-=1;
+    if(keys['KeyA'])fx-=1; if(keys['KeyD'])fx+=1;
+    fx+=move.x; fz+=move.y;
+    const m=Math.hypot(fx,fz); if(m>1){fx/=m;fz/=m;}
+    const sin=Math.sin(P.yaw), cos=Math.cos(P.yaw);
+    const ax=(-sin*fz + cos*fx)*sp, az=(-cos*fz - sin*fx)*sp;
+    P.vx+=(ax-P.vx)*Math.min(1,dt*12);
+    P.vz+=(az-P.vz)*Math.min(1,dt*12);
+    if(P.fly){
+      P.vy=((keys['Space']?6:0)-(keys['ShiftLeft']?6:0));
+    } else {
+      P.vy-=25*dt;
+      if(keys['Space']&&P.onGround){ P.vy=8.6; P.onGround=false; }
+    }
+    collide();
+    if(P.y<-20){ P.x=0.5; P.z=0.5; P.y=hAt(0,0)+3; P.vx=P.vy=P.vz=0; }
+  }
+
+  camera.position.set(P.x, P.y+EYE, P.z);
+  camera.rotation.set(0,0,0);
+  camera.rotateY(P.yaw); camera.rotateX(P.pitch);
+
+  const hit=(locked||isTouch)?raycast():null;
+  if(hit){ hl.visible=true; hl.position.set(hit.x+0.5,hit.y+0.5,hit.z+0.5); }
+  else hl.visible=false;
+
+  coordsEl.textContent=`xyz ${P.x.toFixed(0)}, ${P.y.toFixed(0)}, ${P.z.toFixed(0)}`+(P.fly?'  [fly]':'');
+  renderer.render(scene,camera);
+}
+resize();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

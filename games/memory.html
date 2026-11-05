@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Match — StarHub Arcade</title>
+<link rel="stylesheet" href="../game.css">
+<style>
+.board {
+  display: grid; grid-template-columns: repeat(4, minmax(64px, 108px));
+  gap: 12px; padding: 16px;
+}
+.card {
+  aspect-ratio: 3 / 4; perspective: 700px; cursor: pointer;
+  border-radius: 14px; box-shadow: 0 6px 16px rgba(0,0,0,.38);
+  transition: transform .18s ease;
+}
+.card:hover { transform: translateY(-3px); }
+.card .in {
+  position: relative; width: 100%; height: 100%;
+  transform-style: preserve-3d;
+  transition: transform .5s cubic-bezier(.3, 1.4, .4, 1); /* snappy flip w/ slight overshoot */
+}
+.card.flip .in { transform: rotateY(180deg); }
+.face {
+  position: absolute; inset: 0; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+}
+/* patterned card back — diagonal stripes in accent blue */
+.face.cf {
+  background:
+    repeating-linear-gradient(45deg, rgba(255,255,255,.13) 0 9px, rgba(255,255,255,0) 9px 18px),
+    repeating-linear-gradient(-45deg, rgba(0,0,0,.10) 0 9px, rgba(0,0,0,0) 9px 18px),
+    linear-gradient(150deg, #5f7cff 0%, #3b4ecb 70%, #32409f 100%);
+  border: 1px solid #2a3490;
+  box-shadow: inset 0 0 0 5px rgba(255,255,255,.16), inset 0 2px 8px rgba(255,255,255,.18);
+  color: transparent; font-size: 30px; font-weight: 800;
+}
+.card:hover .cf { filter: brightness(1.1); }
+/* white face with large emoji */
+.face.cb {
+  transform: rotateY(180deg);
+  background: linear-gradient(180deg, #ffffff, #edf0f7);
+  border: 1px solid #cfd6e6;
+  box-shadow: inset 0 0 0 4px #f4f6fb, inset 0 -5px 10px rgba(30,40,80,.07);
+  font-size: clamp(30px, 8vw, 48px);
+}
+.card.done { pointer-events: none; }
+/* matched: stays face-up with a soft success tint + glow */
+.card.done .cb {
+  background: linear-gradient(180deg, #eafff2, #d1f5e0);
+  border-color: #34c98e;
+  box-shadow: inset 0 0 0 3px rgba(52,211,153,.35), 0 0 18px rgba(52,211,153,.45);
+}
+</style>
+</head><body>
+<header class="topbar">
+  <a class="back" href="../index.html">&larr; Arcade</a>
+  <h1>MEMORY MATCH</h1>
+  <span class="hint">Click cards &middot; find all 8 pairs in the fewest moves</span>
+</header>
+<main class="stage">
+  <div class="scorebar"><span>Moves <span id="moves">0</span></span><span>Time <span id="time">0:00</span></span><span class="b">Best <span id="best">&ndash;</span></span></div>
+  <div class="board" id="board"></div>
+  <div class="overlay" id="overlay"><h2>MEMORY MATCH</h2><p>Flip two cards at a time. Match all 8 pairs in as few moves as you can &mdash; every pair you flip counts as one move.</p><button class="btn" id="startBtn">Play</button></div>
+</main>
+<script>
+'use strict';
+const board = document.getElementById('board');
+const movesEl = document.getElementById('moves'), timeEl = document.getElementById('time'), bestEl = document.getElementById('best');
+const overlay = document.getElementById('overlay'), startBtn = document.getElementById('startBtn');
+const KEY = 'arcade_best_memory';
+let best = +localStorage.getItem(KEY) || 0;
+bestEl.textContent = best || '–';
+
+const EMO = ['🚀', '👾', '🌟', '🍕', '🎮', '🐸', '💎', '🔥'];
+let first = null, lock = false, moves = 0, matched = 0, t0 = 0, timer = null;
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function fmt(ms) {
+  const s = Math.floor(ms / 1000);
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+function tick() { timeEl.textContent = fmt(Date.now() - t0); }
+
+function build() {
+  board.innerHTML = '';
+  first = null; lock = false; moves = 0; matched = 0; t0 = 0;
+  clearInterval(timer);
+  movesEl.textContent = '0'; timeEl.textContent = '0:00';
+  for (const e of shuffle([...EMO, ...EMO])) {
+    const c = document.createElement('div');
+    c.className = 'card';
+    c.dataset.v = e;
+    c.innerHTML = '<div class="in"><div class="face cf">?</div><div class="face cb">' + e + '</div></div>';
+    c.addEventListener('click', () => flip(c));
+    board.appendChild(c);
+  }
+}
+
+function flip(c) {
+  if (lock || c.classList.contains('flip')) return;
+  if (!t0) { t0 = Date.now(); timer = setInterval(tick, 250); }
+  c.classList.add('flip');
+  if (!first) { first = c; return; }
+  const a = first; first = null;
+  moves++; movesEl.textContent = moves;
+  if (a.dataset.v === c.dataset.v) {
+    a.classList.add('done'); c.classList.add('done');
+    matched += 2;
+    if (matched === 16) setTimeout(win, 500);
+  } else {
+    lock = true;
+    setTimeout(() => { a.classList.remove('flip'); c.classList.remove('flip'); lock = false; }, 700);
+  }
+}
+
+function win() {
+  clearInterval(timer);
+  const t = fmt(Date.now() - t0);
+  const nb = !best || moves < best;
+  if (nb) { best = moves; localStorage.setItem(KEY, best); bestEl.textContent = best; }
+  overlay.querySelector('h2').textContent = 'YOU WIN!';
+  overlay.querySelector('p').innerHTML = 'All pairs found in <b style="color:var(--acc)">' + moves + '</b> moves and <b style="color:var(--acc)">' + t + '</b>.' + (nb ? ' <b style="color:var(--gold)">New best!</b>' : ' Best: ' + best + ' moves.');
+  startBtn.textContent = 'Play Again';
+  overlay.hidden = false;
+}
+
+startBtn.addEventListener('click', () => { overlay.hidden = true; build(); });
+addEventListener('keydown', e => {
+  if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
+  if ((e.key === ' ' || e.key === 'Enter') && !overlay.hidden) startBtn.click();
+});
+</script>
+</body></html>

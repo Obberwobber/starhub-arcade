@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2048 — StarHub Arcade</title>
+<link rel="stylesheet" href="../game.css">
+<style>
+.board{position:relative;width:min(92vw,62vh,440px);aspect-ratio:1;background:#bbada0;border-radius:10px;touch-action:none;box-shadow:0 12px 44px rgba(0,0,0,.5)}
+.cell{position:absolute;background:#cdc1b4;border-radius:6px}
+.tile{position:absolute;display:flex;align-items:center;justify-content:center;border-radius:6px;font-weight:800;color:#f9f6f2;font-family:"Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;transition:transform .11s ease-in-out;z-index:2}
+.tile.spawn{animation:sp .16s ease-out}
+.tile.pop{animation:pp .18s ease}
+@keyframes sp{from{scale:.3}}
+@keyframes pp{40%{scale:1.18}}
+.v2{background:#eee4da;color:#776e65}.v4{background:#ede0c8;color:#776e65}
+.v8{background:#f2b179}.v16{background:#f59563}.v32{background:#f67c5f}.v64{background:#f65e3b}
+.v128{background:#edcf72}.v256{background:#edcc61}.v512{background:#edc850}
+.v1024{background:#edc53f}.v2048{background:#edc22e;box-shadow:0 0 18px rgba(237,194,46,.6)}
+.vsuper{background:#3c3a32;box-shadow:0 0 18px rgba(237,194,46,.4)}
+</style>
+</head><body>
+<header class="topbar">
+  <a class="back" href="../index.html">&larr; Arcade</a>
+  <h1>2048</h1>
+  <span class="hint">Arrows/WASD or swipe &middot; <span class="kbd">R</span> restart</span>
+</header>
+<main class="stage">
+  <div class="board" id="board"><div id="cells"></div><div id="tiles"></div></div>
+  <div class="scorebar"><span>Score <span id="score">0</span></span><span class="b">Best <span id="best">0</span></span></div>
+  <div class="overlay" id="overlay"><h2>2048</h2><p>Slide the tiles &mdash; matching numbers merge into one. Reach <b>2048</b> to win!</p><button class="btn" id="startBtn">Play</button></div>
+</main>
+<script>
+const N=4,boardEl=document.getElementById('board'),cellLayer=document.getElementById('cells'),tileLayer=document.getElementById('tiles');
+const scoreEl=document.getElementById('score'),bestEl=document.getElementById('best'),overlay=document.getElementById('overlay');
+let tiles=[],score=0,won=false,over=false,anim=false;
+let best=+(localStorage.getItem('arcade_best_g2048')||0);
+bestEl.textContent=best;
+let cell=0,gap=0;
+const cls=v=>v<=2048?'v'+v:'vsuper';
+
+function layout(){
+  const s=boardEl.clientWidth;
+  gap=Math.max(6,s*.025);cell=(s-gap*(N+1))/N;
+  cellLayer.innerHTML='';
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+    const d=document.createElement('div');d.className='cell';
+    d.style.cssText='left:'+(gap+c*(cell+gap))+'px;top:'+(gap+r*(cell+gap))+'px;width:'+cell+'px;height:'+cell+'px';
+    cellLayer.appendChild(d);
+  }
+  tiles.forEach(place);
+}
+function place(t){
+  t.el.style.width=t.el.style.height=cell+'px';
+  t.el.style.fontSize=(t.v<1000?cell*.42:cell*.32)+'px';
+  t.el.style.transform='translate('+(gap+t.c*(cell+gap))+'px,'+(gap+t.r*(cell+gap))+'px)';
+}
+function newTile(r,c,v,spawnAnim){
+  const el=document.createElement('div');
+  el.className='tile '+cls(v)+(spawnAnim?' spawn':'');
+  el.textContent=v;
+  const t={v,r,c,el,gone:false,merged:false,newV:0};
+  tileLayer.appendChild(el);tiles.push(t);place(t);
+  return t;
+}
+function grid(){
+  const g=Array.from({length:N},()=>Array(N).fill(null));
+  tiles.forEach(t=>{if(!t.gone)g[t.r][t.c]=t;});
+  return g;
+}
+function addRandom(){
+  const g=grid(),free=[];
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++)if(!g[r][c])free.push([r,c]);
+  if(!free.length)return;
+  const[r,c]=free[Math.random()*free.length|0];
+  newTile(r,c,Math.random()<.9?2:4,true);
+}
+function saveBest(){best=Math.max(best,score);localStorage.setItem('arcade_best_g2048',best);bestEl.textContent=best;}
+function bump(){scoreEl.textContent=score;if(score>best)bestEl.textContent=score;}
+
+function move(dx,dy){
+  if(anim||over||!overlay.hidden)return;
+  const g=grid(),order=[...tiles].sort((a,b)=>dx?dx*(b.c-a.c):dy*(b.r-a.r));
+  tiles.forEach(t=>t.merged=false);
+  let moved=false;
+  for(const t of order){
+    let nr=t.r,nc=t.c,hit=null;
+    for(;;){
+      const r2=nr+dy,c2=nc+dx;
+      if(r2<0||r2>=N||c2<0||c2>=N)break;
+      if(g[r2][c2]){hit=g[r2][c2];break;}
+      nr=r2;nc=c2;
+    }
+    g[t.r][t.c]=null;
+    if(hit&&hit.v===t.v&&!hit.merged){
+      t.r=hit.r;t.c=hit.c;t.gone=true;
+      hit.merged=true;hit.newV=hit.v*2;
+      score+=hit.newV;moved=true;
+    }else{
+      if(nr!==t.r||nc!==t.c)moved=true;
+      t.r=nr;t.c=nc;g[nr][nc]=t;
+    }
+  }
+  if(!moved)return;
+  anim=true;bump();
+  tiles.forEach(place);
+  setTimeout(()=>{
+    tiles=tiles.filter(t=>{
+      if(t.gone){t.el.remove();return false;}
+      if(t.newV){
+        t.v=t.newV;t.newV=0;
+        t.el.textContent=t.v;
+        t.el.className='tile '+cls(t.v)+' pop';
+        t.el.style.fontSize=(t.v<1000?cell*.42:cell*.32)+'px';
+      }
+      return true;
+    });
+    addRandom();
+    anim=false;
+    if(!won&&tiles.some(t=>t.v>=2048)){won=true;saveBest();showWin();}
+    else if(!canMove()){over=true;saveBest();showOver();}
+  },115);
+}
+function canMove(){
+  const g=grid();
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+    if(!g[r][c])return true;
+    const v=g[r][c].v;
+    if(r+1<N&&g[r+1][c]&&g[r+1][c].v===v)return true;
+    if(c+1<N&&g[r][c+1]&&g[r][c+1].v===v)return true;
+  }
+  return false;
+}
+function showOverlay(title,html,btns){
+  overlay.innerHTML='<h2>'+title+'</h2><p>'+html+'</p>';
+  btns.forEach((b,i)=>{
+    const btn=document.createElement('button');btn.className='btn';btn.textContent=b.label;
+    if(i)btn.style.cssText='background:var(--bg2);color:var(--txt);border:1px solid var(--line)';
+    btn.onclick=b.fn;overlay.appendChild(btn);
+  });
+  overlay.hidden=false;
+}
+function showWin(){
+  overlay.innerHTML='<h2>YOU WIN!</h2><p>You reached <b>2048</b>! Score: <b>'+score+'</b> &nbsp;&middot;&nbsp; Best: <b>'+best+'</b></p>';
+  const keep=document.createElement('button');keep.className='btn';keep.id='keepBtn';
+  keep.textContent='Keep going';keep.onclick=()=>{overlay.hidden=true;};
+  const nw=document.createElement('button');nw.className='btn';nw.textContent='New game';
+  nw.style.cssText='background:var(--bg2);color:var(--txt);border:1px solid var(--line)';
+  nw.onclick=()=>{overlay.hidden=true;reset();};
+  overlay.appendChild(keep);overlay.appendChild(nw);
+  overlay.hidden=false;
+}
+function showOver(){
+  showOverlay('GAME OVER','No moves left. Score: <b>'+score+'</b> &nbsp;&middot;&nbsp; Best: <b>'+best+'</b>',[{label:'Restart',fn:()=>{overlay.hidden=true;reset();}}]);
+}
+function reset(){
+  tileLayer.innerHTML='';tiles=[];score=0;won=false;over=false;anim=false;
+  scoreEl.textContent='0';addRandom();addRandom();
+}
+document.getElementById('startBtn').onclick=()=>{overlay.hidden=true;reset();};
+
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();
+  if(k==='r'){overlay.hidden=true;reset();return;}
+  if(!overlay.hidden){if(k===' '||k==='enter')(overlay.querySelector('#keepBtn')||overlay.querySelector('.btn')).click();return;}
+  const m={arrowup:[0,-1],w:[0,-1],arrowdown:[0,1],s:[0,1],arrowleft:[-1,0],a:[-1,0],arrowright:[1,0],d:[1,0]}[k];
+  if(m)move(m[0],m[1]);
+});
+let tx=0,ty=0;
+boardEl.addEventListener('touchstart',e=>{const t=e.touches[0];tx=t.clientX;ty=t.clientY;},{passive:true});
+boardEl.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+boardEl.addEventListener('touchend',e=>{
+  const t=e.changedTouches[0],dx=t.clientX-tx,dy=t.clientY-ty;
+  if(Math.abs(dx)<24&&Math.abs(dy)<24)return;
+  if(Math.abs(dx)>Math.abs(dy))move(Math.sign(dx),0);else move(0,Math.sign(dy));
+},{passive:true});
+addEventListener('resize',layout);
+reset();layout();
+</script>
+</body></html>

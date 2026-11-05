@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minesweeper — StarHub Arcade</title>
+<link rel="stylesheet" href="../game.css">
+<style>
+.msframe {
+  position: absolute; inset: 0; display: flex;
+  flex-direction: column; align-items: center; justify-content: center;
+  padding: 56px 12px 16px;
+}
+.mswrap {
+  background: #c0c0c0; padding: 9px;
+  border: 3px solid; border-color: #fff #7b7b7b #7b7b7b #fff;
+  box-shadow: 0 10px 44px rgba(0,0,0,.5);
+}
+.mspanel {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 5px 6px; margin-bottom: 9px;
+  border: 2px solid; border-color: #7b7b7b #fff #fff #7b7b7b;
+}
+.led {
+  background: #000; color: #ff0000;
+  font-family: Consolas, "Courier New", monospace; font-weight: 800;
+  font-size: 22px; letter-spacing: 2px; line-height: 1;
+  padding: 3px 4px 2px 8px; min-width: 3.3em; text-align: right;
+  border: 1px solid #7b7b7b;
+}
+.face {
+  width: 40px; height: 40px; font-size: 22px; line-height: 1;
+  cursor: pointer; background: #c0c0c0; padding: 0;
+  border: 3px solid; border-color: #fff #7b7b7b #7b7b7b #fff;
+}
+.face:active { border-color: #7b7b7b #fff #fff #7b7b7b; }
+.board {
+  --cs: 28px;
+  display: grid; gap: 0; user-select: none; touch-action: manipulation;
+  background: #c0c0c0; overflow: hidden;
+  border: 3px solid; border-color: #7b7b7b #fff #fff #7b7b7b;
+}
+.cell {
+  width: var(--cs); height: var(--cs);
+  display: flex; align-items: center; justify-content: center;
+  background: #c0c0c0;
+  border: 3px solid; border-color: #fff #7b7b7b #7b7b7b #fff;
+  font-weight: 800; font-size: calc(var(--cs) * .58); line-height: 1;
+  cursor: pointer; font-family: inherit; color: var(--txt);
+}
+.cell:not(.rev):active { border: 1px solid #808080; }
+.cell.rev { background: #c0c0c0; border: 1px solid #808080; cursor: default; }
+.cell.mine { border: 1px solid #808080; background: #c0c0c0; }
+.cell.boom { border: 1px solid #808080; background: #ff0000; }
+.cell.wrong { border: 1px solid #808080; background: #c0c0c0; color: #ff0000; }
+.n1 { color: #0000ff; } .n2 { color: #008000; } .n3 { color: #ff0000; } .n4 { color: #000080; }
+.n5 { color: #800000; } .n6 { color: #008080; } .n7 { color: #000; } .n8 { color: #808080; }
+.diffrow { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.diffrow .btn { padding: 10px 20px; font-size: 13px; }
+</style>
+</head><body>
+<header class="topbar">
+  <a class="back" href="../index.html">&larr; Arcade</a>
+  <h1>MINESWEEPER</h1>
+  <span class="hint">Click / tap reveal &middot; Right-click / long-press flag &middot; <span class="kbd">R</span> new board</span>
+</header>
+<main class="stage">
+  <div class="scorebar">
+    <span>💣 <span id="mEl">0</span></span>
+    <span>⏱ <span id="tEl">0</span>s</span>
+    <span id="dName">EASY</span>
+    <span>BEST <span class="b" id="bEl">—</span></span>
+  </div>
+  <div class="msframe">
+    <div class="mswrap">
+      <div class="mspanel">
+        <div class="led" id="mLed">000</div>
+        <button class="face" id="face" title="New game">&#128522;</button>
+        <div class="led" id="tLed">000</div>
+      </div>
+      <div class="board" id="board"></div>
+    </div>
+  </div>
+  <div class="overlay" id="overlay"></div>
+</main>
+<script>
+'use strict';
+const board = document.getElementById('board'), overlay = document.getElementById('overlay');
+const mEl = document.getElementById('mEl'), tEl = document.getElementById('tEl');
+const bEl = document.getElementById('bEl'), dName = document.getElementById('dName');
+const LS = 'arcade_best_minesweeper';
+const face = document.getElementById('face');
+const mLed = document.getElementById('mLed'), tLed = document.getElementById('tLed');
+let faceState = 'idle'; /* 'idle' | 'win' | 'lose' — drives the smiley */
+
+const DIFFS = {
+  easy:   { r: 9,  c: 9,  m: 10, label: 'Easy 9×9' },
+  medium: { r: 16, c: 16, m: 40, label: 'Medium 16×16' },
+  hard:   { r: 16, c: 30, m: 99, label: 'Hard 16×30' }
+};
+let diff = 'easy', R = 0, C = 0, M = 0;
+let cells = [], first = true, over = false, opened = 0, flags = 0;
+let t0 = 0, tick = null, elapsed = 0;
+let best = {};
+try { best = JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch (e) { best = {}; }
+
+const nb = i => {
+  const r = Math.floor(i / C), c = i % C, out = [];
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+    if (!dr && !dc) continue;
+    const nr = r + dr, nc = c + dc;
+    if (nr >= 0 && nr < R && nc >= 0 && nc < C) out.push(nr * C + nc);
+  }
+  return out;
+};
+
+function fitBoard() {
+  const r = board.closest('.msframe').getBoundingClientRect();
+  const cs = Math.max(16, Math.min(34, Math.floor(Math.min((r.width - 70) / C, (r.height - 170) / R))));
+  board.style.setProperty('--cs', cs + 'px');
+}
+addEventListener('resize', () => { if (cells.length) fitBoard(); });
+
+const led3 = v => {
+  const n = Math.max(-99, Math.min(999, v));
+  return (n < 0 ? '-' : '') + String(Math.abs(n)).padStart(n < 0 ? 2 : 3, '0');
+};
+function leds() { mLed.textContent = led3(M - flags); tLed.textContent = led3(elapsed); }
+function restFace() {
+  face.textContent = faceState === 'win' ? '😎' : faceState === 'lose' ? '☹️' : '😊';
+}
+
+function hud() {
+  mEl.textContent = M - flags;
+  tEl.textContent = elapsed;
+  dName.textContent = diff.toUpperCase();
+  bEl.textContent = best[diff] != null ? best[diff] + 's' : '—';
+  leds();
+}
+
+function build(d) {
+  diff = d; const cf = DIFFS[d];
+  R = cf.r; C = cf.c; M = cf.m;
+  cells = []; first = true; over = false; opened = 0; flags = 0; elapsed = 0;
+  clearInterval(tick); tick = null;
+  faceState = 'idle'; restFace();
+  board.innerHTML = '';
+  board.style.gridTemplateColumns = 'repeat(' + C + ', var(--cs))';
+  for (let i = 0; i < R * C; i++) {
+    const el = document.createElement('div');
+    el.className = 'cell';
+    el.dataset.i = i;
+    board.appendChild(el);
+    cells.push({ el: el, mine: false, n: 0, open: false, flag: false });
+  }
+  fitBoard(); hud();
+  overlay.hidden = true;
+}
+
+function placeMines(safe) {
+  const banned = new Set([safe, ...nb(safe)]); // first click + neighbours always safe
+  const pool = [];
+  for (let i = 0; i < R * C; i++) if (!banned.has(i)) pool.push(i);
+  for (let k = 0; k < M && pool.length; k++) {
+    const j = Math.floor(Math.random() * pool.length);
+    cells[pool.splice(j, 1)[0]].mine = true;
+  }
+  for (let i = 0; i < R * C; i++)
+    cells[i].n = nb(i).filter(j => cells[j].mine).length;
+}
+
+function startTimer() {
+  t0 = Date.now();
+  tick = setInterval(() => { elapsed = Math.floor((Date.now() - t0) / 1000); tEl.textContent = elapsed; tLed.textContent = led3(elapsed); }, 250);
+}
+
+function openCell(i) {
+  const cell = cells[i];
+  if (cell.open || cell.flag || over) return;
+  cell.open = true; opened++;
+  cell.el.classList.add('rev');
+  if (cell.n > 0) { cell.el.textContent = cell.n; cell.el.classList.add('n' + cell.n); }
+}
+
+function reveal(i) {
+  if (over) return;
+  const cell = cells[i];
+  if (cell.flag || cell.open) { if (cell.open) chord(i); return; }
+  if (first) { first = false; placeMines(i); startTimer(); }
+  if (cell.mine) { lose(i); return; }
+  /* flood fill zeros */
+  const stack = [i];
+  while (stack.length) {
+    const j = stack.pop(), cj = cells[j];
+    if (cj.open || cj.flag) continue;
+    openCell(j);
+    if (cj.n === 0) for (const k of nb(j)) if (!cells[k].open && !cells[k].flag) stack.push(k);
+  }
+  checkWin();
+}
+
+function chord(i) {
+  const cell = cells[i];
+  if (!cell.n) return;
+  const around = nb(i);
+  const fl = around.filter(j => cells[j].flag).length;
+  if (fl !== cell.n) return;
+  for (const j of around) {
+    const cj = cells[j];
+    if (cj.open || cj.flag) continue;
+    if (cj.mine) { lose(j); return; }
+    const stack = [j];
+    while (stack.length) {
+      const k = stack.pop(), ck = cells[k];
+      if (ck.open || ck.flag) continue;
+      openCell(k);
+      if (ck.n === 0) for (const q of nb(k)) if (!cells[q].open && !cells[q].flag) stack.push(q);
+    }
+  }
+  checkWin();
+}
+
+function flag(i) {
+  if (over) return;
+  const cell = cells[i];
+  if (cell.open) return;
+  cell.flag = !cell.flag;
+  flags += cell.flag ? 1 : -1;
+  cell.el.classList.toggle('flag', cell.flag);
+  cell.el.textContent = cell.flag ? '🚩' : '';
+  hud();
+}
+
+function lose(hit) {
+  over = true;
+  clearInterval(tick);
+  for (let i = 0; i < R * C; i++) {
+    const c = cells[i];
+    if (c.mine && !c.flag) { c.el.classList.add('mine'); c.el.textContent = '💣'; }
+    if (!c.mine && c.flag) { c.el.classList.add('wrong'); c.el.textContent = '✖'; }
+  }
+  cells[hit].el.classList.add('boom');
+  faceState = 'lose'; face.textContent = '☹️';
+  endOverlay('BOOM!', 'You hit a mine after <b>' + elapsed + 's</b> on ' + diff + '.<br>Press <span class="kbd">R</span> for a new board.');
+}
+
+function checkWin() {
+  if (opened !== R * C - M) return;
+  over = true;
+  clearInterval(tick);
+  /* auto-flag remaining mines */
+  for (const c of cells) if (c.mine && !c.flag) { c.flag = true; flags++; c.el.classList.add('flag'); c.el.textContent = '🚩'; }
+  /* best clear time per difficulty — lower is better */
+  const prev = best[diff];
+  const rec = prev == null || elapsed < prev;
+  best[diff] = Math.min(prev == null ? Infinity : prev, elapsed);
+  localStorage.setItem(LS, JSON.stringify(best));
+  hud();
+  faceState = 'win'; face.textContent = '😎';
+  endOverlay('CLEARED!', 'Field cleared in <b>' + elapsed + 's</b>' +
+    (rec ? ' — <b>new best!</b>' : ' (best ' + best[diff] + 's)') +
+    '<br>Press <span class="kbd">R</span> for a new board.');
+}
+
+function endOverlay(title, msg) {
+  overlay.innerHTML = '<h2>' + title + '</h2><p>' + msg + '</p>' +
+    '<button class="btn" id="againBtn">Play Again</button>' +
+    '<div class="diffrow">' +
+    '<button class="btn" data-d="easy">Easy 9×9</button>' +
+    '<button class="btn" data-d="medium">Medium 16×16</button>' +
+    '<button class="btn" data-d="hard">Hard 16×30</button></div>';
+  overlay.hidden = false;
+  overlay.querySelector('#againBtn').onclick = () => build(diff);
+  overlay.querySelectorAll('[data-d]').forEach(b => b.onclick = () => build(b.dataset.d));
+}
+
+/* start overlay: pick a difficulty */
+overlay.innerHTML = '<h2>MINESWEEPER</h2>' +
+  '<p>Reveal every safe cell without hitting a mine. Numbers count adjacent mines. ' +
+  'Right-click or long-press to flag. Click a revealed number to chord when its flags are placed. ' +
+  'First click is always safe.</p>' +
+  '<div class="diffrow">' +
+  '<button class="btn" data-d="easy">Easy 9×9 · 10</button>' +
+  '<button class="btn" data-d="medium">Medium 16×16 · 40</button>' +
+  '<button class="btn" data-d="hard">Hard 16×30 · 99</button></div>';
+overlay.querySelectorAll('[data-d]').forEach(b => b.onclick = () => build(b.dataset.d));
+
+/* ---- input: click reveal, right-click flag, long-press flag ---- */
+let lpTimer = null, lpUsed = false;
+board.addEventListener('click', e => {
+  if (lpUsed) { lpUsed = false; return; }
+  const t = e.target.closest('.cell');
+  if (t) reveal(+t.dataset.i);
+});
+board.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const t = e.target.closest('.cell');
+  if (t) flag(+t.dataset.i);
+});
+board.addEventListener('touchstart', e => {
+  const t = e.target.closest('.cell');
+  if (!t) return;
+  const i = +t.dataset.i;
+  lpUsed = false;
+  lpTimer = setTimeout(() => { flag(i); lpUsed = true; }, 420);
+}, { passive: true });
+board.addEventListener('touchend', () => clearTimeout(lpTimer));
+board.addEventListener('touchmove', () => clearTimeout(lpTimer));
+
+/* classic smiley button: restart on click, 😮 while pressing a cell */
+face.addEventListener('click', () => build(diff));
+board.addEventListener('mousedown', e => {
+  if (!over && e.target.closest('.cell:not(.rev)')) face.textContent = '😮';
+});
+addEventListener('mouseup', () => restFace());
+board.addEventListener('touchstart', e => {
+  if (!over && e.target.closest('.cell:not(.rev)')) face.textContent = '😮';
+}, { passive: true });
+board.addEventListener('touchend', restFace);
+
+const STOP = new Set([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+addEventListener('keydown', e => {
+  if (STOP.has(e.key)) e.preventDefault();
+  if (e.repeat) return;
+  if (e.key.toLowerCase() === 'r' || (e.key === ' ' && over)) build(diff);
+});
+</script>
+</body></html>

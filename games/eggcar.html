@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Eggy Car — StarHub Arcade</title>
+<link rel="stylesheet" href="../game.css">
+<style>
+  .stage { background: linear-gradient(#79c4f2 0%, #a8d8f8 55%, #d7edff 100%); touch-action: none; }
+  canvas.game { width: 100%; height: 100%; }
+  .pedal {
+    position: absolute; bottom: 22px; z-index: 5; width: 110px; height: 72px;
+    border-radius: 14px; border: 2px solid rgba(255,255,255,.4);
+    background: rgba(8,12,26,.45); color: #fff; font-weight: 800;
+    display: none; place-items: center; font-size: 13px; letter-spacing: 1px;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  body.touch .pedal { display: grid; }
+  #pedL { left: 22px; } #pedR { right: 22px; }
+  .pedal.on { background: rgba(110,231,255,.5); }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="back" href="../index.html">&larr; Arcade</a>
+  <h1>EGGY CAR</h1>
+  <span class="hint"><span class="kbd">→</span>/<span class="kbd">D</span> gas · <span class="kbd">←</span>/<span class="kbd">A</span> brake · don't crack the egg!</span>
+</header>
+<main class="stage" id="stage">
+  <canvas class="game" id="c"></canvas>
+  <div class="scorebar"><span>DIST <b id="dist">0</b> m</span><span>🪙 <b id="coins">0</b></span><span class="b">BEST <b id="best">0</b> m</span></div>
+  <div class="pedal" id="pedL">◀ BRAKE</div>
+  <div class="pedal" id="pedR">GAS ▶</div>
+  <div class="overlay" id="overlay">
+    <h2 id="ovTitle">EGGY CAR</h2>
+    <p id="ovText">You're transporting a very fragile egg over very bumpy hills.
+      Feather the gas — one hard landing and it's omelette time.</p>
+    <button class="btn" id="startBtn">Drive</button>
+  </div>
+</main>
+<script>
+'use strict';
+const c=document.getElementById('c'), ctx=c.getContext('2d');
+const stage=document.getElementById('stage');
+const distEl=document.getElementById('dist'), bestEl=document.getElementById('best'), coinsEl=document.getElementById('coins');
+const overlay=document.getElementById('overlay'), ovTitle=document.getElementById('ovTitle'), ovText=document.getElementById('ovText');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR=Math.min(devicePixelRatio||1,2);
+  W=stage.clientWidth; H=stage.clientHeight;
+  c.width=W*DPR; c.height=H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize',resize); resize();
+
+/* ---------- terrain ---------- */
+// world units = pixels; y grows downward. groundY(x) is the surface height.
+function groundY(x){
+  if(x<0) x=0;
+  const amp=Math.min(1.9, 0.45 + x*0.00010);
+  let y=340;
+  y+=Math.sin(x*0.0035)*70;
+  y+=Math.sin(x*0.0085+1.7)*38;
+  y+=Math.sin(x*0.021+4.0)*13;
+  y+=Math.sin(x*0.051+2.2)*5;
+  return 300+(y-340)*amp;
+}
+function groundSlope(x){ return (groundY(x+3)-groundY(x-3))/6; }
+function groundNormal(x){
+  const s=groundSlope(x), m=Math.hypot(1,s);
+  return [s/m, -1/m]; // up-facing normal in y-down space
+}
+
+/* ---------- car ---------- */
+const CHW=54, CHH=16;          // chassis half-width/height
+const WR=15;                   // wheel radius
+const SUS_L=30;                // suspension rest length
+const wheelOff=[{x:-40,y:8},{x:40,y:8}];
+let car, egg, state, camX=0, dead=false, deadT=0, crackPos=null;
+let coins=[], nextCoin=0;
+
+function reset(){
+  const gx=120, gy=groundY(120);
+  car={x:gx, y:gy-70, a:0, vx:0, vy:0, w:0, wheelRot:[0,0], wheelComp:[0,0], onGround:[false,false]};
+  egg={x:gx, y:gy-70-CHH-15, vx:0, vy:0, r:14, crack:false};
+  state={dist:0, maxX:gx, dead:false, coins:0};
+  coins=[]; nextCoin=gx+260;
+  dead=false; deadT=0; crackPos=null;
+}
+reset();
+let best=+(localStorage.getItem('arcade_best_eggcar')||0);
+bestEl.textContent=Math.floor(best);
+
+const keys={};
+addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space'].includes(e.code)) e.preventDefault();
+  if(e.code==='KeyR'&&dead) start();
+});
+addEventListener('keyup',e=>keys[e.code]=false);
+let tGas=false,tBrk=false;
+if('ontouchstart' in window) document.body.classList.add('touch');
+const pedR=document.getElementById('pedR'), pedL=document.getElementById('pedL');
+for(const [el,set] of [[pedR,v=>tGas=v],[pedL,v=>tBrk=v]]){
+  el.addEventListener('touchstart',e=>{e.preventDefault();set(true);el.classList.add('on');},{passive:false});
+  el.addEventListener('touchend',e=>{e.preventDefault();set(false);el.classList.remove('on');},{passive:false});
+  el.addEventListener('mousedown',()=>{set(true);el.classList.add('on');});
+  el.addEventListener('mouseup',()=>{set(false);el.classList.remove('on');});
+}
+
+function start(){
+  reset(); overlay.hidden=true;
+  // unlock physics
+  state.running=true;
+}
+document.getElementById('startBtn').onclick=start;
+
+function gameOver(){
+  if(dead) return;
+  dead=true; deadT=0; crackPos={x:egg.x, y:egg.y};
+  if(state.dist>best){ best=state.dist; localStorage.setItem('arcade_best_eggcar',Math.floor(best)); }
+  bestEl.textContent=Math.floor(best);
+  setTimeout(()=>{
+    ovTitle.textContent='CRACKED!';
+    ovText.innerHTML=`The egg didn't survive. You drove <b>${Math.floor(state.dist)} m</b> — best ${Math.floor(best)} m.`;
+    document.getElementById('startBtn').textContent='Retry';
+    overlay.hidden=false;
+  },900);
+}
+
+/* ---------- physics ---------- */
+function step(dt){
+  const gas=(keys['ArrowRight']||keys['KeyD']||tGas)?1:0;
+  const brk=(keys['ArrowLeft']||keys['KeyA']||tBrk)?1:0;
+  const throttle=gas-brk*0.8;
+
+  const cos=Math.cos(car.a), sin=Math.sin(car.a);
+  // chassis-local axes: right (cos,sin), down (-sin,cos)
+  const rx=cos, ry=sin, dx=-sin, dy=cos;
+
+  // gravity
+  car.vy+=1400*dt;
+
+  const I=CHW*CHW*0.9;         // inertia-ish
+  for(let i=0;i<2;i++){
+    const o=wheelOff[i];
+    const ax=car.x+rx*o.x+dx*o.y, ay=car.y+ry*o.x+dy*o.y;   // anchor point
+    // wheel centre at full extension
+    let wx=ax+dx*SUS_L, wy=ay+dy*SUS_L;
+    const gy=groundY(wx);
+    let comp=0;
+    if(wy+WR>gy){
+      comp=Math.min(SUS_L*0.9,(wy+WR-gy));
+      wy=gy-WR;
+    }
+    car.wheelComp[i]=comp;
+    car.onGround[i]=comp>0.5;
+    if(comp>0){
+      const [nx,ny]=groundNormal(wx);
+      // spring force along normal
+      const F=comp*260+((car.vx*nx+car.vy*ny)<0?-(car.vx*nx+car.vy*ny)*26:0);
+      car.vx+=nx*F*dt; car.vy+=ny*F*dt;
+      // torque: r x F  (anchor - centre)
+      const px=ax-car.x, py=ay-car.y;
+      car.w+=(px*(ny*F)-py*(nx*F))/I*dt*60;
+      // engine + rolling friction along tangent (in y-down: tangent = (-ny, nx))
+      const tx=-ny, ty=nx;
+      const vt=car.vx*tx+car.vy*ty;
+      let Ft=throttle*950 - vt*(throttle?4:14);   // grip: damp sideways slide + drive
+      car.vx+=tx*Ft*dt; car.vy+=ty*Ft*dt;
+      car.w+=(px*(ty*Ft)-py*(tx*Ft))/I*dt*60;
+      car.wheelRot[i]+=(vt/WR)*dt + throttle*dt*6;
+    }
+  }
+
+  // body scrapes terrain — push corners out
+  for(const [cxs,cys] of [[-1,-1],[1,-1],[-1,1],[1,1]]){
+    const px=car.x+rx*CHW*cxs+dx*CHH*cys, py=car.y+ry*CHW*cxs+dy*CHH*cys;
+    const gy=groundY(px);
+    if(py>gy-2){
+      const pen=py-gy+2, [nx,ny]=groundNormal(px);
+      car.vx+=nx*pen*120*dt; car.vy+=ny*pen*120*dt;
+      car.w+=((px-car.x)*(ny*pen*120)-(py-car.y)*(nx*pen*120))/I*dt*40;
+    }
+  }
+
+  // integrate chassis
+  car.vx*=0.998; car.vy*=0.999; car.w*=0.985;
+  car.x+=car.vx*dt; car.y+=car.vy*dt; car.a+=car.w*dt;
+
+  /* ---- egg: free circle vs chassis OBB + basket lips + ground ---- */
+  egg.vy+=1400*dt;
+  egg.x+=egg.vx*dt; egg.y+=egg.vy*dt;
+  egg.vx*=0.999;
+  // to chassis-local
+  const ex=egg.x-car.x, ey=egg.y-car.y;
+  const lx=ex*cos+ey*sin, ly=-ex*sin+ey*cos;
+  // basket walls: two lip circles on top edge
+  for(const sgn of [-1,1]){
+    const bx=sgn*(CHW*0.62), by=-CHH-8;
+    const ddx=lx-bx, ddy=ly-by, d=Math.hypot(ddx,ddy), rr=egg.r+7;
+    if(d<rr){
+      const nxl=ddx/d, nyl=ddy/d;
+      pushEgg(nxl,nyl,rr-d);
+    }
+  }
+  // chassis box
+  {
+    const qx=Math.max(-CHW,Math.min(CHW,lx)), qy=Math.max(-CHH,Math.min(CHH,ly));
+    let nx=lx-qx, ny=ly-qy, d=Math.hypot(nx,ny);
+    if(d<egg.r){
+      if(d<0.001){ nx=0; ny=-1; d=1; } else { nx/=d; ny/=d; }
+      pushEgg(nx,ny,egg.r-d);
+    }
+  }
+  // ground = crack
+  if(egg.y+egg.r>groundY(egg.x)) gameOver();
+  // fell miles away
+  if(Math.abs(egg.x-car.x)>400||egg.y>car.y+500) gameOver();
+
+  function pushEgg(nxl,nyl,pen){
+    // rotate normal back to world (y-down space)
+    const nwx=nxl*cos-nyl*sin, nwy=nxl*sin+nyl*cos;
+    egg.x+=nwx*pen; egg.y+=nwy*pen;
+    const vn=egg.vx*nwx+egg.vy*nwy;
+    if(vn<0){ egg.vx-=nwx*vn*1.25; egg.vy-=nwy*vn*1.25; }   // soft bounce
+    // friction: damp tangential velocity toward chassis velocity at contact
+    const cvx=car.vx-(car.w)*((egg.y-car.y))*0.02, cvy=car.vy;
+    egg.vx+=(cvx-egg.vx)*0.06;
+  }
+
+  // coins: spawn ahead, collect on car overlap
+  while(nextCoin<car.x+1200){
+    const cx=nextCoin;
+    coins.push({x:cx, y:groundY(cx)-52-((cx/17|0)%3)*16, got:false, spin:cx});
+    nextCoin+=170+((cx*7)%150);
+  }
+  coins=coins.filter(cn=>cn.x>car.x-300 && !cn.got);
+  for(const cn of coins)
+    if(Math.abs(cn.x-car.x)<58 && Math.abs(cn.y-car.y)<62){ cn.got=true; state.coins++; }
+
+  state.maxX=Math.max(state.maxX,car.x);
+  state.dist=Math.max(0,(state.maxX-120)/50);
+  distEl.textContent=Math.floor(state.dist);
+  coinsEl.textContent=state.coins;
+  if(dead) deadT+=dt;
+}
+
+/* ---------- drawing ---------- */
+function draw(){
+  // camera
+  camX+=((car.x-W*0.38)-camX)*0.08;
+  const camY=(car.y-H*0.55)*0.5;
+  ctx.clearRect(0,0,W,H);
+
+  // sun
+  ctx.fillStyle='#ffe27a';
+  ctx.beginPath(); ctx.arc(W-110, 76, 34, 0, 7); ctx.fill();
+  ctx.fillStyle='rgba(255,226,122,.35)';
+  ctx.beginPath(); ctx.arc(W-110, 76, 48, 0, 7); ctx.fill();
+
+  // far mountain range (parallax 0.15)
+  ridge(camX*0.15 - camY*0.08, H*0.62, 150, 'rgba(90,140,150,.45)');
+  // mid hills (parallax 0.4)
+  ridge(camX*0.4 - camY*0.18, H*0.78, 95, 'rgba(110,170,110,.55)');
+
+  function ridge(off, baseY, amp, color){
+    ctx.fillStyle=color;
+    ctx.beginPath(); ctx.moveTo(-20,H);
+    for(let sx=-20;sx<=W+40;sx+=14){
+      const wx=sx+off;
+      ctx.lineTo(sx, baseY - (Math.sin(wx*0.004)*0.6+Math.sin(wx*0.011+2)*0.4)*amp);
+    }
+    ctx.lineTo(W+40,H); ctx.closePath(); ctx.fill();
+  }
+
+  // clouds
+  ctx.fillStyle='rgba(255,255,255,.85)';
+  for(let i=0;i<8;i++){
+    const cx=((i*431+camX*0.25)%(W+400))-200;
+    const cy=40+((i*97)%140)-camY*0.1;
+    cloud(cx% (W+400),cy,26+(i%3)*8);
+  }
+  function cloud(x,y,r){
+    if(x<-80) x+=W+400;
+    ctx.beginPath();
+    ctx.arc(x,y,r,0,7); ctx.arc(x+r,y+4,r*0.7,0,7); ctx.arc(x-r,y+5,r*0.65,0,7);
+    ctx.fill();
+  }
+
+  ctx.save();
+  ctx.translate(-camX, -camY);
+
+  // terrain — dirt body
+  const x0=Math.floor(camX/8)*8-16, x1=camX+W+16;
+  ctx.beginPath(); ctx.moveTo(x0,H+camY+200);
+  for(let x=x0;x<=x1;x+=8) ctx.lineTo(x,groundY(x));
+  ctx.lineTo(x1,H+camY+200); ctx.closePath();
+  const gg=ctx.createLinearGradient(0,car.y-200,0,car.y+300);
+  gg.addColorStop(0,'#8a5f38'); gg.addColorStop(1,'#5d3d22');
+  ctx.fillStyle=gg; ctx.fill();
+  // grass band
+  ctx.beginPath(); ctx.moveTo(x0,groundY(x0)+14);
+  for(let x=x0;x<=x1;x+=8) ctx.lineTo(x,groundY(x)+14);
+  for(let x=x1;x>=x0;x-=8) ctx.lineTo(x,groundY(x));
+  ctx.closePath();
+  const gr=ctx.createLinearGradient(0,car.y-140,0,car.y+40);
+  gr.addColorStop(0,'#8fd95e'); gr.addColorStop(1,'#57a838');
+  ctx.fillStyle=gr; ctx.fill();
+  // dirt speckles
+  ctx.fillStyle='rgba(60,38,18,.35)';
+  for(let x=x0;x<=x1;x+=26){
+    const y=groundY(x)+22+Math.abs(Math.sin(x*7.13)*43758.5%1)*60;
+    ctx.fillRect(x,y,5,5);
+  }
+  // grass fringe + flowers
+  ctx.strokeStyle='#4c8f2e'; ctx.lineWidth=3;
+  ctx.beginPath();
+  for(let x=x0;x<=x1;x+=8) { const y=groundY(x); ctx.moveTo(x,y); ctx.lineTo(x,y+7); }
+  ctx.stroke();
+  // coins
+  for(const cn of coins){
+    if(cn.got) continue;
+    ctx.save(); ctx.translate(cn.x,cn.y);
+    const sq=Math.abs(Math.sin(performance.now()/350+cn.spin*0.01));
+    ctx.scale(0.35+0.65*sq,1);
+    ctx.fillStyle='#ffd23e'; ctx.beginPath(); ctx.arc(0,0,11,0,7); ctx.fill();
+    ctx.strokeStyle='#d9a41c'; ctx.lineWidth=2.5; ctx.stroke();
+    ctx.fillStyle='#fff0b3'; ctx.beginPath(); ctx.arc(-3,-3,3.5,0,7); ctx.fill();
+    ctx.restore();
+  }
+  for(let x=x0;x<=x1;x+=60){
+    const r=Math.abs(Math.sin(x*12.9898)*43758.5453)%1;
+    if(r<0.3){
+      const y=groundY(x);
+      ctx.fillStyle=['#ffd166','#ff6b8a','#c8a2ff'][Math.floor(r*10)];
+      ctx.beginPath(); ctx.arc(x,y-6,3.4,0,7); ctx.fill();
+      ctx.strokeStyle='#3a7a22'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,y-6); ctx.stroke();
+    }
+  }
+
+  drawCar();
+  if(!dead||deadT<0.05) drawEgg(egg.x,egg.y,false);
+  if(crackPos&&dead){
+    drawEgg(crackPos.x,crackPos.y+2,true);
+  }
+  ctx.restore();
+}
+function drawCar(){
+  ctx.save();
+  ctx.translate(car.x,car.y); ctx.rotate(car.a);
+  // wheels
+  const cos=Math.cos(car.a),sin=Math.sin(car.a);
+  for(let i=0;i<2;i++){
+    const o=wheelOff[i];
+    const wy=o.y+SUS_L-car.wheelComp[i];
+    ctx.save();
+    ctx.translate(o.x,wy); ctx.rotate(car.wheelRot[i]);
+    ctx.fillStyle='#1c2030'; ctx.beginPath(); ctx.arc(0,0,WR,0,7); ctx.fill();
+    ctx.fillStyle='#3a4060'; ctx.beginPath(); ctx.arc(0,0,WR*0.55,0,7); ctx.fill();
+    ctx.strokeStyle='#8b93b8'; ctx.lineWidth=2;
+    for(let s=0;s<4;s++){ctx.beginPath();ctx.moveTo(0,-WR*0.8);ctx.lineTo(0,WR*0.8);ctx.stroke();ctx.rotate(Math.PI/4);}
+    ctx.restore();
+  }
+  // body
+  ctx.fillStyle='#e8552f';
+  rr(-CHW,-CHH-6,CHW*2,CHH*1.9,9); ctx.fill();
+  // cabin
+  ctx.fillStyle='#f47a4d';
+  rr(-CHW*0.55,-CHH-24,CHW*0.75,22,7); ctx.fill();
+  ctx.fillStyle='#bfe8ff';
+  rr(-CHW*0.48,-CHH-20,CHW*0.3,15,4); ctx.fill();
+  // basket
+  ctx.fillStyle='#7a4a22';
+  ctx.fillRect(-CHW*0.62,-CHH-8,6,12);
+  ctx.fillRect(CHW*0.62-6,-CHH-8,6,12);
+  ctx.fillRect(-CHW*0.62,-CHH-2,CHW*1.24,6);
+  // headlight
+  ctx.fillStyle='#ffe9a3'; ctx.beginPath(); ctx.arc(CHW-4,-CHH+2,4,0,7); ctx.fill();
+  ctx.restore();
+}
+function drawEgg(x,y,cracked){
+  ctx.save(); ctx.translate(x,y);
+  ctx.fillStyle='#fff8ec';
+  ctx.beginPath(); ctx.ellipse(0,0,egg.r*0.82,egg.r,0,0,7); ctx.fill();
+  ctx.strokeStyle='#d8cdb8'; ctx.lineWidth=1.5; ctx.stroke();
+  if(!cracked){
+    // cute face
+    ctx.fillStyle='#333';
+    ctx.beginPath(); ctx.arc(-3.4,-2,1.6,0,7); ctx.arc(3.4,-2,1.6,0,7); ctx.fill();
+    ctx.strokeStyle='#333'; ctx.lineWidth=1.3;
+    ctx.beginPath(); ctx.arc(0,1.5,3.2,0.25*Math.PI,0.75*Math.PI); ctx.stroke();
+    ctx.fillStyle='rgba(255,150,150,.5)';
+    ctx.beginPath(); ctx.arc(-6,2,2.2,0,7); ctx.arc(6,2,2.2,0,7); ctx.fill();
+  }
+  if(cracked){
+    ctx.strokeStyle='#8a7a5a'; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(-6,-8); ctx.lineTo(-2,-3); ctx.lineTo(-7,1); ctx.lineTo(0,6); ctx.lineTo(4,0); ctx.lineTo(8,-5);
+    ctx.stroke();
+    ctx.fillStyle='#ffd23e';
+    ctx.beginPath(); ctx.ellipse(0,egg.r+2,10,4,0,0,7); ctx.fill();
+  }
+  ctx.restore();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+/* ---------- loop ---------- */
+let last=performance.now(), acc=0, running=false;
+function loop(now){
+  requestAnimationFrame(loop);
+  let dt=(now-last)/1000; last=now;
+  if(!overlay.hidden){ draw(); return; }
+  acc+=Math.min(dt,0.05);
+  while(acc>1/120){ step(1/120); acc-=1/120; }
+  draw();
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

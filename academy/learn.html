@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StarHub Academy — Learn</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="app">
+<header class="topbar">
+  <a class="back" href="index.html">← Home</a>
+  <h1>LEARN</h1>
+  <div class="spacer">
+    <button class="planbtn" id="planBtn">Plan: <span id="planLabel"></span></button>
+    <a class="play" href="playground.html">Playground →</a>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="side">
+    <div class="prog">
+      <div class="lbl">
+        <span>YOUR PROGRESS</span>
+        <span id="progText">0/36</span>
+      </div>
+      <div class="bar2"><i id="progBar"></i></div>
+    </div>
+    <div id="trackList"></div>
+    <button class="desklink" id="deskLink">
+      <span>🛎️ Code Desk</span>
+      <small>Get help with your project (Advanced+)</small>
+    </button>
+  </aside>
+
+  <main class="lesson">
+    <div class="lesson-inner" id="lessonContainer"></div>
+  </main>
+</div>
+
+<!-- plan modal -->
+<div class="modal-bg" id="planModal">
+  <div class="modal">
+    <h3>Choose your plan</h3>
+    <p class="msub">Plans are unlocked locally — no payment is processed. Upgrade at any time.</p>
+    <div id="planOpts"></div>
+    <div class="mfoot">
+      <button class="btn ghost" id="closePlan">Cancel</button>
+    </div>
+    <p class="note">Your plan is stored in your browser. Clearing cookies resets it.</p>
+  </div>
+</div>
+
+<!-- code desk modal -->
+<div class="modal-bg" id="deskModal">
+  <div class="modal desk">
+    <h3>🛎️ Code Desk</h3>
+    <p class="msub">Describe what you're building and where you're stuck. A mentor will respond with guidance.</p>
+    <form id="deskForm">
+      <label>What are you building?</label>
+      <input type="text" id="deskProject" placeholder="e.g. A budget tracker, a guessing game, a to-do list..." required>
+      <label>Where are you stuck?</label>
+      <textarea id="deskDesc" placeholder="I'm trying to X but Y happens. Here's my code: ..." required></textarea>
+      <button type="submit" class="btn">Submit request</button>
+    </form>
+    <div class="past" id="deskPast"></div>
+    <div class="mfoot">
+      <button class="btn ghost" id="closeDesk">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="lessons.js"></script>
+<script src="app.js"></script>
+<script>
+// state
+let curLesson = null;
+let lastRunLogs = [];
+
+// UI refs
+const trackList = document.getElementById('trackList');
+const lessonContainer = document.getElementById('lessonContainer');
+const planBtn = document.getElementById('planBtn');
+const planLabel = document.getElementById('planLabel');
+const planModal = document.getElementById('planModal');
+const planOpts = document.getElementById('planOpts');
+const closePlan = document.getElementById('closePlan');
+const deskLink = document.getElementById('deskLink');
+const deskModal = document.getElementById('deskModal');
+const deskForm = document.getElementById('deskForm');
+const deskPast = document.getElementById('deskPast');
+const closeDesk = document.getElementById('closeDesk');
+const progText = document.getElementById('progText');
+const progBar = document.getElementById('progBar');
+
+// update plan label
+function updatePlanUI() {
+  const p = getPlan();
+  planLabel.textContent = PLANS[p].name;
+  planBtn.className = 'planbtn';
+  planBtn.classList.add('b-' + p);
+  renderSidebar();
+}
+updatePlanUI();
+
+// plan modal
+planBtn.onclick = () => {
+  planOpts.innerHTML = '';
+  for (const t of TIERS) {
+    const div = document.createElement('div');
+    div.className = 'opt' + (getPlan() === t ? ' sel' : '');
+    div.innerHTML = `<span>${PLANS[t].name}</span><span class="p">${PLANS[t].price}</span><small>${PLANS[t].blurb}</small>`;
+    div.onclick = () => { setPlan(t); updatePlanUI(); planModal.classList.remove('show'); };
+    planOpts.appendChild(div);
+  }
+  planModal.classList.add('show');
+};
+closePlan.onclick = () => planModal.classList.remove('show');
+
+// code desk (advanced+ only)
+deskLink.onclick = () => {
+  if (!canAccess('advanced')) {
+    alert('Code Desk is available on the Advanced plan and above. Upgrade from the sidebar.');
+    return;
+  }
+  loadDeskPast();
+  deskModal.classList.add('show');
+};
+closeDesk.onclick = () => deskModal.classList.remove('show');
+
+function loadDeskPast() {
+  try {
+    const p = JSON.parse(localStorage.getItem(DESK_KEY)) || [];
+    deskPast.innerHTML = '';
+    if (!p.length) {
+      deskPast.innerHTML = '<p style="color:var(--dim);font-size:13px;margin-top:16px;">No past requests.</p>';
+      return;
+    }
+    for (const r of p) {
+      const div = document.createElement('div');
+      div.className = 'req';
+      div.innerHTML = `<h5>${esc(r.project)}</h5><p>${esc(r.desc)}</p><span class="status">${r.status}</span>`;
+      deskPast.appendChild(div);
+    }
+  } catch (e) { deskPast.innerHTML = ''; }
+}
+
+deskForm.onsubmit = e => {
+  e.preventDefault();
+  const req = {
+    project: document.getElementById('deskProject').value,
+    desc: document.getElementById('deskDesc').value,
+    status: 'Pending mentor response',
+    ts: Date.now(),
+  };
+  try {
+    const arr = JSON.parse(localStorage.getItem(DESK_KEY)) || [];
+    arr.unshift(req);
+    localStorage.setItem(DESK_KEY, JSON.stringify(arr));
+    loadDeskPast();
+    document.getElementById('deskProject').value = '';
+    document.getElementById('deskDesc').value = '';
+  } catch (e) { alert('Could not save request.'); }
+};
+
+// sidebar + progress
+function renderSidebar() {
+  trackList.innerHTML = '';
+  const prog = getProgress();
+  let doneCount = 0;
+  for (const t of TRACKS) {
+    const group = document.createElement('div');
+    group.className = 'tgroup';
+    group.innerHTML = `<div class="thead"><h4>${t.icon} ${t.name}</h4><span class="badge b-${t.tier}">${PLANS[t.tier].name}</span></div>`;
+    for (const l of t.lessons) {
+      if (prog[l.id]) doneCount++;
+      const btn = document.createElement('button');
+      btn.className = 'litem' + (curLesson?.id === l.id ? ' sel' : '') + (prog[l.id] ? ' done' : '');
+      const locked = !canAccess(t.tier);
+      btn.innerHTML = `<span class="st">${prog[l.id] ? '✓' : (locked ? '🔒' : (t.lessons.indexOf(l) + 1))}</span><span class="t">${l.title}</span><span class="m">${l.mins}m</span>`;
+      if (locked) btn.classList.add('locked');
+      else btn.onclick = () => loadLesson(l);
+      group.appendChild(btn);
+    }
+    trackList.appendChild(group);
+  }
+  progText.textContent = `${doneCount}/${ALL_LESSONS.length}`;
+  progBar.style.width = `${(doneCount / ALL_LESSONS.length) * 100}%`;
+}
+
+// load lesson
+function loadLesson(lesson) {
+  curLesson = lesson;
+  renderSidebar();
+  location.hash = lesson.id;
+  const prog = getProgress();
+  const track = lesson.track;
+  const locked = !canAccess(track.tier);
+
+  let html = `
+    <div class="lhead">
+      <h2>${lesson.title}</h2>
+      <span class="badge b-${track.tier}">${PLANS[track.tier].name}</span>
+      <span style="color:var(--dim);font-size:12.5px;">${lesson.mins} min</span>
+      <button class="donebtn ${prog[lesson.id] ? 'is-done' : ''}" id="doneBtn">${prog[lesson.id] ? 'Done' : 'Mark done'}</button>
+    </div>
+    <div class="lmeta">${track.name} · Lesson ${track.lessons.indexOf(lesson) + 1} of ${track.lessons.length}</div>
+  `;
+
+  if (locked) {
+    html += `
+      <div class="lockedbox">
+        <div class="big">🔒</div>
+        <h3>This lesson is locked</h3>
+        <p>This lesson is part of the <strong>${PLANS[track.tier].name}</strong> plan. Upgrade from the sidebar to unlock ${track.lessons.length} lessons in this track.</p>
+        <button class="btn" onclick="document.getElementById('planBtn').click()">Upgrade to ${PLANS[track.tier].name}</button>
+      </div>
+    `;
+  } else {
+    html += `<div class="content">${lesson.content}</div>`;
+    if (lesson.mentor) {
+      html += `<div class="mentor"><div class="who">👩‍💻</div><div class="body"><b>Mentor note</b><p>${lesson.mentor}</p></div></div>`;
+    }
+    if (lesson.exercise) {
+      const ex = lesson.exercise;
+      html += `
+        <div class="exercise">
+          <div class="ehead"><span class="et">Exercise</span><span class="ep">${ex.prompt}</span></div>
+          <textarea id="editor" spellcheck="false">${ex.starter}</textarea>
+          <div class="ebar">
+            <button class="btn" id="runBtn">Run code</button>
+            <button class="hintbtn" id="hintBtn">💡 Hint</button>
+            <span class="kbdhint">⌨️ Ctrl+Enter to run</span>
+          </div>
+          <div class="hints" id="hints"></div>
+          <div class="console" id="console"><div class="clabel">CONSOLE OUTPUT</div><div id="consoleLines"></div></div>
+          <div class="verdict" id="verdict"></div>
+        </div>
+      `;
+    }
+  }
+
+  // lesson nav
+  const idx = track.lessons.indexOf(lesson);
+  if (idx > 0) {
+    const prev = track.lessons[idx - 1];
+    html += `<div class="lnav"><a href="#${prev.id}" data-id="${prev.id}"><small>Previous</small>${prev.title}</a></div>`;
+  }
+  if (idx < track.lessons.length - 1) {
+    const next = track.lessons[idx + 1];
+    html += `<div class="lnav"><a href="#${next.id}" data-id="${next.id}" style="margin-left:auto;"><small>Next</small>${next.title} →</a></div>`;
+  }
+
+  lessonContainer.innerHTML = html;
+
+  // event bindings
+  const doneBtn = document.getElementById('doneBtn');
+  if (doneBtn) {
+    doneBtn.onclick = () => {
+      if (prog[lesson.id]) return;
+      markDone(lesson.id);
+      renderSidebar();
+      doneBtn.textContent = 'Done';
+      doneBtn.classList.add('is-done');
+    };
+  }
+
+  const editor = document.getElementById('editor');
+  const runBtn = document.getElementById('runBtn');
+  const consoleEl = document.getElementById('console');
+  const consoleLines = document.getElementById('consoleLines');
+  const hintsEl = document.getElementById('hints');
+  const verdictEl = document.getElementById('verdict');
+  const hintBtn = document.getElementById('hintBtn');
+
+  if (editor && runBtn) {
+    let hintIdx = 0;
+    runBtn.onclick = () => runCodeEx();
+    editor.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); runCodeEx(); }
+    });
+    hintBtn.onclick = () => {
+      if (lesson.exercise.hints && hintIdx < lesson.exercise.hints.length) {
+        const div = document.createElement('div');
+        div.className = 'hint';
+        div.textContent = lesson.exercise.hints[hintIdx];
+        hintsEl.appendChild(div);
+        hintsEl.style.display = 'block';
+        hintIdx++;
+        if (hintIdx >= lesson.exercise.hints.length) hintBtn.disabled = true;
+      }
+    };
+
+    function runCodeEx() {
+      const code = editor.value;
+      verdictEl.className = 'verdict';
+      verdictEl.innerHTML = '';
+      consoleEl.classList.add('show');
+      consoleLines.innerHTML = '';
+      runCode(code, res => {
+        lastRunLogs = res.logs;
+        for (const l of res.logs) {
+          const div = document.createElement('div');
+          div.className = 'line' + (l.t === 'err' ? ' err' : (l.t === 'warn' ? ' warn' : ''));
+          div.textContent = l.text;
+          consoleLines.appendChild(div);
+        }
+        if (lesson.exercise) {
+          const fails = gradeExercise(lesson.exercise, code, res.logs);
+          if (fails.length) {
+            verdictEl.className = 'verdict fail show';
+            verdictEl.innerHTML = 'Not quite.<small>' + fails.join('<br>') + '</small>';
+          } else {
+            verdictEl.className = 'verdict pass show';
+            verdictEl.innerHTML = '✓ Exercise passed!';
+            if (!prog[lesson.id]) {
+              markDone(lesson.id);
+              renderSidebar();
+              if (doneBtn) {
+                doneBtn.textContent = 'Done';
+                doneBtn.classList.add('is-done');
+              }
+            }
+          }
+        }
+      });
+    }
+  }
+
+  // nav click handler
+  lessonContainer.querySelectorAll('.lnav a').forEach(a => {
+    a.onclick = e => {
+      e.preventDefault();
+      const lid = a.dataset.id;
+      const ll = ALL_LESSONS.find(l => l.id === lid);
+      if (ll) loadLesson(ll);
+    };
+  });
+}
+
+// initial load from hash
+const initId = location.hash.slice(1);
+if (initId) {
+  const ll = ALL_LESSONS.find(l => l.id === initId);
+  if (ll) loadLesson(ll);
+  else loadLesson(TRACKS[0].lessons[0]);
+} else {
+  loadLesson(TRACKS[0].lessons[0]);
+}
+</script>
+</body>
+</html>

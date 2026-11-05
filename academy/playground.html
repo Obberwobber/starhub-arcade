@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StarHub Academy — Playground</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="app">
+<header class="topbar">
+  <a class="back" href="learn.html">← Learn</a>
+  <h1>PLAYGROUND</h1>
+  <div class="spacer"></div>
+</header>
+
+<div class="pg">
+  <div class="pane">
+    <div class="panehead">
+      <b>CODE</b>
+      <div class="right">
+        <button class="btn small" id="runBtn">Run (Ctrl+Enter)</button>
+        <button class="btn small ghost" id="clearBtn">Clear</button>
+      </div>
+    </div>
+    <textarea id="pgeditor" spellcheck="false" placeholder="// Write JavaScript here
+// Press Ctrl+Enter to run
+
+console.log("Hello, playground!");
+
+const arr = [1, 2, 3, 4, 5];
+const doubled = arr.map(n => n * 2);
+console.log(doubled);"></textarea>
+  </div>
+  <div class="pane">
+    <div class="panehead">
+      <b>CONSOLE</b>
+    </div>
+    <div class="console show" id="console">
+      <div class="clabel">OUTPUT</div>
+      <div id="consoleLines"></div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+const editor = document.getElementById('pgeditor');
+const runBtn = document.getElementById('runBtn');
+const clearBtn = document.getElementById('clearBtn');
+const consoleLines = document.getElementById('consoleLines');
+
+function run() {
+  const code = editor.value;
+  consoleLines.innerHTML = '';
+  runCode(code, res => {
+    for (const l of res.logs) {
+      const div = document.createElement('div');
+      div.className = 'line' + (l.t === 'err' ? ' err' : (l.t === 'warn' ? ' warn' : ''));
+      div.textContent = l.text;
+      consoleLines.appendChild(div);
+    }
+  });
+}
+
+runBtn.onclick = run;
+clearBtn.onclick = () => { editor.value = ''; consoleLines.innerHTML = ''; };
+editor.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); run(); }
+});
+</script>
+</body>
+</html>

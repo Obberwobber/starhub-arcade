@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Black Snap Sender</title>
+  <meta property="og:site_name" content="Black Snap Sender">
+  <meta property="og:title" content="Send a black snap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>Black Snap Sender</h1>
+    <p class="subtitle">Generates a black 9:16 image and hands it to Snapchat.</p>
+
+    <div class="preview">
+      <canvas id="snapCanvas" width="1080" height="1920"></canvas>
+    </div>
+
+    <button id="sendBtn" type="button">Send black snap</button>
+    <a id="downloadLink" download="black-snap.png">Download image</a>
+
+    <p class="note" id="statusNote">
+      On mobile this opens the share sheet — pick <b>Snapchat</b>, then choose
+      your friend and hit send inside the app. Picking the friend has to happen
+      inside Snapchat; there is no API for a website to list your friends or
+      send on your behalf.
+    </p>
+
+    <div
+      class="snapchat-creative-kit-share"
+      data-theme="dark"
+      data-size="large"
+    ></div>
+    <p class="note small">
+      Desktop: the button above shares a link to this page via Snap's Creative
+      Kit. To send the actual black snap, use this page on your phone.
+    </p>
+  </main>
+
+  <script src="main.js"></script>
+  <script>
+    (function (d, s, id) {
+      var js, sjs = d.getElementsByTagName(s)[0];
+      if (d.getElementById(id)) return;
+      js = d.createElement(s); js.id = id;
+      js.src = 'https://sdk.snapkit.com/js/v1/create.js';
+      sjs.parentNode.insertBefore(js, sjs);
+    })(document, 'script', 'snapkit-creative-kit-sdk');
+  </script>
+</body>
+</html>
